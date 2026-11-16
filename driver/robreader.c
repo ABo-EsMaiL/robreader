@@ -24,11 +24,25 @@
  * ---------
  *   device : \\.\RobReader
  *   ioctl  : IOCTL_ROB_READ
- *   input  : ROB_READ_REQUEST { ProcessId, Address, Size }
+ *   input  : ROB_READ_REQUEST { ProcessId, Address, Address64, Size }
  *   output : the raw bytes that were read
  */
 
-#include <ntddk.h>
+#include <ntifs.h>
+
+/*
+ * These two have moved between WDK versions and are not declared by
+ * every kit, so declare them here and keep the build independent of the
+ * kit version.
+ */
+NTSTATUS PsLookupProcessByProcessId(HANDLE ProcessId, PEPROCESS *Process);
+NTSTATUS MmCopyVirtualMemory(PEPROCESS SourceProcess,
+                             PVOID SourceAddress,
+                             PEPROCESS TargetProcess,
+                             PVOID TargetAddress,
+                             SIZE_T BufferSize,
+                             KPROCESSOR_MODE PreviousMode,
+                             PSIZE_T ReturnSize);
 
 #define ROB_DEVICE_NAME  L"\\Device\\RobReader"
 #define ROB_DOS_DEVICE   L"\\DosDevices\\RobReader"
@@ -43,14 +57,6 @@ typedef struct _ROB_READ_REQUEST {
     ULONG Size;           /* bytes to read                           */
     ULONG Reserved;
 } ROB_READ_REQUEST;
-
-typedef struct _ROB_READ_HEADER {
-    NTSTATUS Status;
-    ULONG BytesRead;
-    ULONG64 Address;
-} ROB_READ_HEADER;
-
-DRIVER_OBJECT gDriverObject;
 
 static void RobUnload(PDRIVER_OBJECT DriverObject)
 {
@@ -145,7 +151,6 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
 
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = RobDeviceControl;
     DriverObject->DriverUnload = RobUnload;
-    gDriverObject = DriverObject;
 
     RtlInitUnicodeString(&deviceName, ROB_DEVICE_NAME);
     RtlInitUnicodeString(&dosName, ROB_DOS_DEVICE);

@@ -96,7 +96,7 @@ jobs:
 
           echo === compiling ===
           cl /nologo /kernel /c /Zl /W3 /GS- /GR- /EHs- /std:c17 ^
-             /D_KERNEL_MODE /D_UNICODE /D_AMD64_ /D_AMD64 /D_X86_64 ^
+             /D_UNICODE /D_AMD64_ /D_AMD64 /D_X86_64 ^
              /I"%KMINC%" /I"%KMSH%" ^
              /I"%WindowsSdkDir%Include\%WindowsSDKVersion%\km" ^
              /I"%WindowsSdkDir%Include\%WindowsSDKVersion%\shared" ^
