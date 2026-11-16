@@ -1,8 +1,5 @@
-include(FetchContent)
-
-message(STATUS "Installing all required dependencies")
+﻿message(STATUS "Installing all required dependencies")
 
 add_subdirectory(plog)
 add_subdirectory(minhook)
 add_subdirectory(libhv)
-add_subdirectory(crashlog)

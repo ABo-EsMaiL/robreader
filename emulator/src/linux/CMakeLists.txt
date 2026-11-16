@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+﻿cmake_minimum_required(VERSION 3.29)
 project(EACServer)
 
 add_executable(EACServer
@@ -46,4 +46,5 @@ add_executable(EACServer
         api/login_status_handler.cpp
         api/login_status_handler.h
 )
-target_link_libraries(EACServer hv_static crashlog)
+target_link_libraries(EACServer hv_static)
+

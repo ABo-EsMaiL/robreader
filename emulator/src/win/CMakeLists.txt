@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+﻿cmake_minimum_required(VERSION 3.29)
 project(EOSSDK-Win64-Shipping)
 
 add_library(EOSSDK-Win64-Shipping SHARED
@@ -27,4 +27,4 @@ add_library(EOSSDK-Win64-Shipping SHARED
         sock/websocket_client.cpp
         sock/websocket_client.h
 )
-target_link_libraries(EOSSDK-Win64-Shipping hv_static crashlog)
+target_link_libraries(EOSSDK-Win64-Shipping hv_static)
