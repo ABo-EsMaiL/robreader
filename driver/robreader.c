@@ -30,20 +30,6 @@
 
 #include <ntifs.h>
 
-/*
- * These two have moved between WDK versions and are not declared by
- * every kit, so declare them here and keep the build independent of the
- * kit version.
- */
-NTSTATUS PsLookupProcessByProcessId(HANDLE ProcessId, PEPROCESS *Process);
-NTSTATUS MmCopyVirtualMemory(PEPROCESS SourceProcess,
-                             PVOID SourceAddress,
-                             PEPROCESS TargetProcess,
-                             PVOID TargetAddress,
-                             SIZE_T BufferSize,
-                             KPROCESSOR_MODE PreviousMode,
-                             PSIZE_T ReturnSize);
-
 #define ROB_DEVICE_NAME  L"\\Device\\RobReader"
 #define ROB_DOS_DEVICE   L"\\DosDevices\\RobReader"
 #define ROB_TAG          'borR'

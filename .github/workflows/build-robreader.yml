@@ -93,6 +93,7 @@ jobs:
           echo KMINC=%KMINC%
           echo KMSH=%KMSH%
           echo KMLIB=%KMLIB%
+          del build.log 2>nul
 
           echo === compiling ===
           cl /nologo /kernel /c /Zl /W3 /GS- /GR- /EHs- /std:c17 ^
@@ -101,17 +102,27 @@ jobs:
              /I"%WindowsSdkDir%Include\%WindowsSDKVersion%\km" ^
              /I"%WindowsSdkDir%Include\%WindowsSDKVersion%\shared" ^
              /I"%WindowsSdkDir%Include\%WindowsSDKVersion%\ucrt" ^
-             /Fo:robreader.obj driver\robreader.c
+             /Fo:robreader.obj driver\robreader.c > build.log 2>&1
+          type build.log
           if errorlevel 1 exit /b 1
 
           echo === linking ===
           link /nologo /driver /subsystem:native /entry:DriverEntry /machine:x64 ^
               /nodefaultlib /out:robreader.sys robreader.obj ^
               /lib:"%KMLIB%\ntoskrnl.lib" ^
-              /lib:"%KMLIB%\hal.lib"
+              /lib:"%KMLIB%\hal.lib" >> build.log 2>&1
+          type build.log
           if errorlevel 1 exit /b 1
 
-          dir robreader.sys
+          dir robreader.sys >> build.log 2>&1
+          type build.log
+
+      - name: upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: sign with a throw away test certificate
         shell: pwsh
