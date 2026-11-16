@@ -1,12 +1,11 @@
 cmake_minimum_required(VERSION 3.29)
-project(version)
+project(EACServer)
 
-add_library(version SHARED
+add_executable(EACServer
         ${includes_deps}
         dllmain.cpp
         bootstrapper.cpp
         bootstrapper.h
-        exports.def
         forwarding/exports.cpp
         forwarding/forwarder.cpp
         forwarding/forwarder.h
@@ -47,4 +46,4 @@ add_library(version SHARED
         api/login_status_handler.cpp
         api/login_status_handler.h
 )
-target_link_libraries(version hv_static crashlog)
+target_link_libraries(EACServer hv_static crashlog)

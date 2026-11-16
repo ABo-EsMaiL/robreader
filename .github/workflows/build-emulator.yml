@@ -54,20 +54,24 @@ jobs:
           echo === building === >> build.log
           cmake --build emulator\build --config Release --parallel >> build.log 2>&1
           type build.log
+          if errorlevel 1 exit /b 1
 
       - name: collect the DLLs
         shell: cmd
         run: |
           if not exist out mkdir out
-          for %%f in (EOSSDK-Win64-Shipping.dll version.dll) do (
-            if exist emulator\build\src\%%f\Release\%%f copy emulator\build\src\%%f\Release\%%f out\%%f
-            if exist emulator\build\src\%%f\%%f copy emulator\build\src\%%f\%%f out\%%f
+          for %%f in (EOSSDK-Win64-Shipping.dll EACServer.exe) do (
+            if exist emulator\build\src\win\%%f\Release\%%f copy emulator\build\src\win\%%f\Release\%%f out\%%f
+            if exist emulator\build\src\linux\%%f\Release\%%f copy emulator\build\src\linux\%%f\Release\%%f out\%%f
+            if exist emulator\build\src\win\%%f\%%f copy emulator\build\src\win\%%f\%%f out\%%f
+            if exist emulator\build\src\linux\%%f\%%f copy emulator\build\src\linux\%%f\%%f out\%%f
           )
           dir out
           echo === hashes === >> build.log
-          certutil -hashfile out\EOSSDK-Win64-Shipping.dll SHA256 >> build.log 2>&1
-          certutil -hashfile out\version.dll SHA256 >> build.log 2>&1
+          for %%f in (out\*) do certutil -hashfile %%f SHA256 >> build.log 2>&1
           type build.log
+          if not exist out\EOSSDK-Win64-Shipping.dll exit /b 1
+          if not exist out\EACServer.exe exit /b 1
 
       - name: upload the build log
         if: always()

@@ -14,6 +14,14 @@
 #include "servers/websocket_server.h"
 
 int bootstrapper::Dummy_WinMain() {
+	bootstrapper::run(bootstrapper::tcp_port, bootstrapper::http_port);
+	return 0;
+}
+
+void bootstrapper::run(int tcp_port, int http_port) {
+	bootstrapper::tcp_port = tcp_port;
+	bootstrapper::http_port = http_port;
+
 	handler_registry::init();
 	api_handler_registry::init();
 
@@ -28,6 +36,17 @@ int bootstrapper::Dummy_WinMain() {
 			eos_platform::tick();
 		}
 	}
+}
+
+void bootstrapper::start(int tcp_port, int http_port) {
+	bootstrapper::tcp_port = tcp_port;
+	bootstrapper::http_port = http_port;
+
+	if (LoadLibraryA(EOS_SDK_PATH) == nullptr) {
+		PLOGF.printf("Failed to perform LoadLibraryA EOSSDK-Win64-Shipping.dll!");
+		return;
+	}
+	PLOGD.printf("EOSSDK-Win64-Shipping.dll Loaded");
 }
 
 void bootstrapper::hook_winmain() {
@@ -47,14 +66,6 @@ void bootstrapper::hook_winmain() {
 }
 
 void bootstrapper::main(int tcp_port, int http_port) {
-	bootstrapper::tcp_port = tcp_port;
-	bootstrapper::http_port = http_port;
-
-	if (LoadLibraryA(EOS_SDK_PATH) == nullptr) {
-		PLOGF.printf("Failed to perform LoadLibraryA EOSSDK-Win64-Shipping.dll!");
-		return;
-	}
-	PLOGD.printf("EOSSDK-Win64-Shipping.dll Loaded");
-
+	bootstrapper::start(tcp_port, http_port);
 	hook_winmain();
 }
