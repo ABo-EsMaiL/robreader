@@ -108,7 +108,7 @@ jobs:
 
           echo === linking ===
           echo === linking === >> build.log
-          link /nologo /driver /machine:x64 ^
+          link /nologo /driver /subsystem:native /entry:DriverEntry /machine:x64 ^
               /nodefaultlib /merge:_TEXT=.text /export:DriverEntry ^
               /out:robreader.sys robreader.obj ^
               "%KMLIB%\ntoskrnl.lib" ^
@@ -165,9 +165,15 @@ jobs:
         shell: pwsh
         run: |
           $w = $env:GITHUB_WORKSPACE
-          $files = @("$w\robreader.sys")
+          $files = @()
+          if (Test-Path "$w\robreader.sys") { $files += "$w\robreader.sys" }
           if (Test-Path "$w\robreader-cert.cer") { $files += "$w\robreader-cert.cer" }
+          if ($files.Count -eq 0) {
+              Write-Host 'nothing to package'
+              exit 0
+          }
           Compress-Archive -Path $files -DestinationPath "$w\robreader.zip" -Force
+          Write-Host "packaged $($files.Count) file(s)"
 
       - uses: actions/upload-artifact@v4
         if: always()
