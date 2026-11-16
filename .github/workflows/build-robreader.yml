@@ -29,30 +29,49 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $wdk = "${env:ProgramFiles(x86)}\Windows Kits\10"
 
-          function Newest-Version($folder) {
-              $dirs = Get-ChildItem $folder -Directory -ErrorAction SilentlyContinue |
-                      Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
-                      Sort-Object { [version]$_.Name } -Descending
-              if (-not $dirs) { throw "no version folders in $folder" }
-              return $dirs[0].Name
-          }
-
-          $incVer = Newest-Version "$wdk\Include"
-          $libVer = Newest-Version "$wdk\Lib"
-          Write-Host "WDK include version : $incVer"
-          Write-Host "WDK library version : $libVer"
-
-          $kmLib = "$wdk\Lib\$libVer\x64\km"
-          foreach ($l in @('ntoskrnl.lib', 'hal.lib', 'wmip.lib')) {
-              $p = Join-Path $kmLib $l
-              if (-not (Test-Path $p)) {
-                  Write-Host "missing $l - listing what is there:"
-                  Get-ChildItem $kmLib | Select-Object -First 30 Name | Out-Host
-                  throw "$l not found in $kmLib"
+          Write-Host "=== layout under $wdk ==="
+          foreach ($sub in @('Include', 'Lib')) {
+              $p = Join-Path $wdk $sub
+              if (Test-Path $p) {
+                  Write-Host "  $sub :"
+                  Get-ChildItem $p -Directory -ErrorAction SilentlyContinue |
+                      ForEach-Object { Write-Host "     $($_.Name)" }
               }
           }
-          "WDKINC=$wdk\Include\$incVer" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "WDKLIB=$wdk\Lib\$libVer" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          # find the kernel mode headers by looking for ntddk.h
+          $ntddk = Get-ChildItem "$wdk\Include" -Recurse -Filter 'ntddk.h' `
+                      -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $ntddk) {
+              Write-Host "ntddk.h not found - dumping the include tree"
+              Get-ChildItem "$wdk\Include" -Recurse -Depth 3 -Directory |
+                  Select-Object -First 60 FullName | Out-Host
+              throw 'ntddk.h not found'
+          }
+          $kmInc = $ntddk.Directory.FullName            # ...\Include\<ver>\km
+          $sharedInc = Join-Path (Split-Path $kmInc -Parent) 'shared'
+
+          # find the kernel mode import libraries by looking for ntoskrnl.lib
+          $ntoskrnl = Get-ChildItem "$wdk\Lib" -Recurse -Filter 'ntoskrnl.lib' `
+                         -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $ntoskrnl) {
+              Write-Host "ntoskrnl.lib not found - dumping the lib tree"
+              Get-ChildItem "$wdk\Lib" -Recurse -Depth 3 -Directory |
+                  Select-Object -First 60 FullName | Out-Host
+              throw 'ntoskrnl.lib not found'
+          }
+          $kmLib = $ntoskrnl.Directory.FullName          # ...\Lib\<ver>\x64\km
+
+          Write-Host "km includes : $kmInc"
+          Write-Host "km lib      : $kmLib"
+          foreach ($l in @('hal.lib', 'wmip.lib', 'ndis.lib')) {
+              $p = Join-Path $kmLib $l
+              Write-Host ("  {0}: {1}" -f $l, (Test-Path $p))
+          }
+
+          "KMINC=$kmInc"   | Out-File -FilePath $env:GITHUB_ENV -Append
+          "KMSH=$sharedInc"| Out-File -FilePath $env:GITHUB_ENV -Append
+          "KMLIB=$kmLib"   | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: show toolchain
         shell: cmd
@@ -67,9 +86,9 @@ jobs:
         run: |
           call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
 
-          set "KMINC=%WDKINC%\km"
-          set "KMSH=%WDKINC%\shared"
-          set "KMLIB=%WDKLIB%\x64\km"
+          echo KMINC=%KMINC%
+          echo KMSH=%KMSH%
+          echo KMLIB=%KMLIB%
 
           echo === compiling ===
           cl /nologo /kernel /c /Zl /Wv /GS- /GR- /EHs- /std:c17 ^
