@@ -189,6 +189,45 @@ jobs:
           path: sign.log
           if-no-files-found: warn
 
+      # Proof that a kernel with NORMAL signature enforcement accepts this
+      # driver.  The GitHub runner has test signing off, so if the driver
+      # loads here it will load on our machine as well.
+      - name: can a normal kernel load this driver
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $w = $env:GITHUB_WORKSPACE
+          $log = Join-Path $w 'loadtest.log'
+          "" | Out-File -FilePath $log -Encoding utf8
+          function W($m) { $m | Tee-Object -FilePath $log -Append }
+
+          $cer = Join-Path $w 'robreader-cert.cer'
+          $sys = Join-Path $w 'robreader.sys'
+          if (-not (Test-Path $cer)) { W "no certificate - skipping"; exit 0 }
+
+          W "=== trusting the certificate ==="
+          foreach ($store in @("Root", "TrustedPublisher")) {
+              Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\$store" | Out-Null
+              W "  added to LocalMachine\$store"
+          }
+          $sig = Get-AuthenticodeSignature $sys
+          W "signature status now: $($sig.Status)"
+
+          W "=== loading the driver ==="
+          & sc.exe create robreader type= kernel start= demand binPath= "$sys" 2>&1 |
+              ForEach-Object { W $_ }
+          & sc.exe start robreader 2>&1 | ForEach-Object { W $_ }
+          Start-Sleep -Seconds 2
+          & sc.exe query robreader 2>&1 | ForEach-Object { W $_ }
+
+      - name: upload the load test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-log
+          path: loadtest.log
+          if-no-files-found: warn
+
       - name: package
         if: always()
         shell: pwsh
