@@ -1,0 +1,8 @@
+﻿bin/
+obj/
+*.sys
+*.obj
+*.pdb
+*.pfx
+*.cer
+*.zip
