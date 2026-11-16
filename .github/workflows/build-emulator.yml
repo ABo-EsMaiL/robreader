@@ -1,0 +1,85 @@
+name: build-emulator
+
+# Builds the Easy Anti-Cheat emulator:
+#
+#   emulator/src/win   -> EOSSDK-Win64-Shipping.dll   (replaces the game's EOS SDK)
+#   emulator/src/linux -> version.dll                 (the local EAC server, side
+#                                                    loaded next to the game exe)
+#
+# Both are plain Windows x64 DLLs, so the same MSVC toolchain that builds the
+# kernel driver builds these too.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "emulator/**"
+      - ".github/workflows/build-emulator.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: show the toolchain
+        shell: cmd
+        run: |
+          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          where cl
+          cl 2>&1 | findstr Version
+          cmake --version
+          git --version
+
+      - name: configure
+        shell: cmd
+        run: |
+          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          del build.log 2>nul
+          echo === configuring === > build.log
+          cmake -S emulator -B emulator\build ^
+              -G "Visual Studio 17 2022" -A x64 ^
+              -DCMAKE_BUILD_TYPE=Release ^
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5 >> build.log 2>&1
+          type build.log
+          if not exist emulator\build\CMakeCache.txt exit /b 1
+
+      - name: build
+        shell: cmd
+        run: |
+          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          echo === building === >> build.log
+          cmake --build emulator\build --config Release --parallel >> build.log 2>&1
+          type build.log
+
+      - name: collect the DLLs
+        shell: cmd
+        run: |
+          if not exist out mkdir out
+          for %%f in (EOSSDK-Win64-Shipping.dll version.dll) do (
+            if exist emulator\build\src\%%f\Release\%%f copy emulator\build\src\%%f\Release\%%f out\%%f
+            if exist emulator\build\src\%%f\%%f copy emulator\build\src\%%f\%%f out\%%f
+          )
+          dir out
+          echo === hashes === >> build.log
+          certutil -hashfile out\EOSSDK-Win64-Shipping.dll SHA256 >> build.log 2>&1
+          certutil -hashfile out\version.dll SHA256 >> build.log 2>&1
+          type build.log
+
+      - name: upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-build-log
+          path: build.log
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eac-emulator
+          path: out
+          if-no-files-found: warn

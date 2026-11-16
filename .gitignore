@@ -6,3 +6,7 @@ obj/
 *.pfx
 *.cer
 *.zip
+
+emulator/build/
+out/
+config.json
