@@ -109,8 +109,8 @@ jobs:
           echo === linking ===
           echo === linking === >> build.log
           link /nologo /driver /machine:x64 ^
-              /nodefaultlib /merge:_TEXT=.text ^
-              /out:robreader.sys robreader.obj driver\robreader.def ^
+              /nodefaultlib /merge:_TEXT=.text /export:DriverEntry ^
+              /out:robreader.sys robreader.obj ^
               "%KMLIB%\ntoskrnl.lib" ^
               "%KMLIB%\hal.lib" >> build.log 2>&1
           type build.log
