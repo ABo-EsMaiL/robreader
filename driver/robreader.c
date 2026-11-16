@@ -30,9 +30,23 @@
 
 #include <ntifs.h>
 
+/*
+ * MmCopyVirtualMemory is not declared by every WDK release, so declare it
+ * here with dllimport.  The dllimport is what makes the linker emit an
+ * __imp_MmCopyVirtualMemory reference, which is what ntoskrnl.lib
+ * provides.
+ */
+__declspec(dllimport) NTSTATUS __stdcall MmCopyVirtualMemory(
+    PEPROCESS SourceProcess,
+    PVOID SourceAddress,
+    PEPROCESS TargetProcess,
+    PVOID TargetAddress,
+    SIZE_T BufferSize,
+    KPROCESSOR_MODE PreviousMode,
+    PSIZE_T ReturnSize);
+
 #define ROB_DEVICE_NAME  L"\\Device\\RobReader"
 #define ROB_DOS_DEVICE   L"\\DosDevices\\RobReader"
-#define ROB_TAG          'borR'
 
 #define IOCTL_ROB_READ   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
@@ -44,12 +58,14 @@ typedef struct _ROB_READ_REQUEST {
     ULONG Reserved;
 } ROB_READ_REQUEST;
 
-static void RobUnload(PDRIVER_OBJECT DriverObject)
+static void RobCopy(PVOID Destination, PVOID Source, ULONG Length)
 {
-    IoDeleteSymbolicLink((PUNICODE_STRING)ROB_DOS_DEVICE);
-    if (DriverObject->DeviceObject)
-        IoDeleteDevice(DriverObject->DeviceObject);
-    DbgPrint("[RobReader] unloaded\n");
+    unsigned char *d = (unsigned char *)Destination;
+    unsigned char *s = (unsigned char *)Source;
+    ULONG i;
+
+    for (i = 0; i < Length; i++)
+        d[i] = s[i];
 }
 
 static NTSTATUS RobComplete(PIRP Irp, NTSTATUS Status, ULONG_PTR Info)
@@ -58,6 +74,13 @@ static NTSTATUS RobComplete(PIRP Irp, NTSTATUS Status, ULONG_PTR Info)
     Irp->IoStatus.Information = Info;
     IofCompleteRequest(Irp, IO_NO_INCREMENT);
     return Status;
+}
+
+/* Default handler for the IRP major functions we do not implement. */
+static NTSTATUS RobUnsupported(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+    return RobComplete(Irp, STATUS_NOT_SUPPORTED, 0);
 }
 
 static NTSTATUS RobDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
@@ -82,14 +105,14 @@ static NTSTATUS RobDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
         return RobComplete(Irp, STATUS_BUFFER_TOO_SMALL, 0);
     }
 
-    RtlCopyMemory(&request, systemBuffer, sizeof(ROB_READ_REQUEST));
+    RobCopy(&request, systemBuffer, sizeof(ROB_READ_REQUEST));
 
     if (request.Size == 0 || request.Size > outLength) {
         return RobComplete(Irp, STATUS_INVALID_PARAMETER, 0);
     }
 
     status = PsLookupProcessByProcessId((HANDLE)(ULONG_PTR)request.ProcessId,
-                                       &process);
+                                        &process);
     if (!NT_SUCCESS(status)) {
         return RobComplete(Irp, STATUS_INVALID_CID, 0);
     }
@@ -115,10 +138,18 @@ static NTSTATUS RobDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
         return RobComplete(Irp, status, 0);
     }
 
-    DbgPrint("[RobReader] pid %u addr %p -> %zu bytes\n",
-             request.ProcessId, address, bytesRead);
+    DbgPrint("[RobReader] pid %u addr %p -> %u bytes\n",
+             request.ProcessId, address, (ULONG)bytesRead);
 
     return RobComplete(Irp, STATUS_SUCCESS, (ULONG_PTR)bytesRead);
+}
+
+static void RobUnload(PDRIVER_OBJECT DriverObject)
+{
+    IoDeleteSymbolicLink((PUNICODE_STRING)ROB_DOS_DEVICE);
+    if (DriverObject->DeviceObject)
+        IoDeleteDevice(DriverObject->DeviceObject);
+    DbgPrint("[RobReader] unloaded\n");
 }
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
@@ -133,7 +164,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
     UNREFERENCED_PARAMETER(RegistryPath);
 
     for (i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; i++)
-        DriverObject->MajorFunction[i] = RobComplete;
+        DriverObject->MajorFunction[i] = RobUnsupported;
 
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = RobDeviceControl;
     DriverObject->DriverUnload = RobUnload;
@@ -149,14 +180,14 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
                             FALSE,
                             &deviceObject);
     if (!NT_SUCCESS(status)) {
-        DbgPrint("[RobReader] IoCreateDevice failed 0x%08X\n", status);
+        DbgPrint("[RobReader] IoCreateDevice failed 0x%08X\n", (ULONG)status);
         return status;
     }
 
     status = IoCreateSymbolicLink(&dosName, &deviceName);
     if (!NT_SUCCESS(status)) {
         IoDeleteDevice(deviceObject);
-        DbgPrint("[RobReader] IoCreateSymbolicLink failed 0x%08X\n", status);
+        DbgPrint("[RobReader] IoCreateSymbolicLink failed 0x%08X\n", (ULONG)status);
         return status;
     }
 

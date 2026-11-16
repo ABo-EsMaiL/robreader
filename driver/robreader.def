@@ -1,0 +1,5 @@
+; The kernel looks the driver's entry point up by name in the export
+; table, so DriverEntry has to be exported explicitly.
+LIBRARY robreader
+EXPORTS
+    DriverEntry
