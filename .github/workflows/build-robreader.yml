@@ -128,37 +128,66 @@ jobs:
           name: build-log
           path: build.log
 
-      # Test signing mode accepts an unsigned driver, so a failure here is
-      # not fatal - the .sys is still usable.
-      - name: sign with a throw away test certificate
+      # The kernel only accepts a driver signed with signtool: the PowerShell
+      # Set-AuthenticodeSignature cmdlet does not add the page hashes that
+      # Windows requires for kernel mode images, so such a driver is refused
+      # with 577 even though Get-AuthenticodeSignature says "Valid".
+      - name: sign with a throw away certificate
         continue-on-error: true
         shell: pwsh
         run: |
           $w = $env:GITHUB_WORKSPACE
           $pfx = Join-Path $w 'robreader.pfx'
           $cer = Join-Path $w 'robreader-cert.cer'
+          $log = Join-Path $w 'sign.log'
           $pass = ConvertTo-SecureString -String 'robreader' -Force -AsPlainText
+          "" | Out-File -FilePath $log -Encoding utf8
+          function W($m) { $m | Tee-Object -FilePath $log -Append }
 
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert `
-              -Subject 'CN=RobReader' `
-              -CertStoreLocation Cert:\CurrentUser\My `
-              -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
-              -NotAfter (Get-Date).AddYears(3) `
-              -ExportableKeyUsage 'Code Signing'
-          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pass
-          Export-Certificate -Cert $cert -FilePath $cer
+          try {
+              $cert = New-SelfSignedCertificate -Type Custom `
+                  -Subject 'CN=RobReader' `
+                  -CertStoreLocation Cert:\CurrentUser\My `
+                  -KeyAlgorithm RSA -KeyLength 2048 -KeySpec Signature `
+                  -KeyUsage DigitalSignature `
+                  -KeyExportPolicy Exportable `
+                  -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3') `
+                  -NotAfter (Get-Date).AddYears(10)
+              W "certificate created: $($cert.Thumbprint)"
+              Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pass | Out-Null
+              Export-Certificate -Cert $cert -FilePath $cer | Out-Null
+              W "exported pfx and cer"
+          } catch {
+              W "certificate error: $($_.Exception.Message)"
+          }
 
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
               -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
               Where-Object { $_.FullName -match 'x64' } |
               Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signtool) { Write-Host 'signtool.exe not found - skipping'; exit 0 }
-          Write-Host "using $($signtool.FullName)"
-          & $signtool.FullName sign /v /fd sha256 /f $pfx /p robreader `
-              (Join-Path $w 'robreader.sys')
-          Write-Host "signtool exit code: $LASTEXITCODE"
-          Get-AuthenticodeSignature (Join-Path $w 'robreader.sys') |
-              Format-List Status, StatusMessage | Out-Host
+          if (-not $signtool) { W "signtool.exe not found"; exit 0 }
+          W "using $($signtool.FullName)"
+
+          $target = Join-Path $w 'robreader.sys'
+          & $signtool.FullName sign /v /fd sha256 /f $pfx /p robreader $target 2>&1 |
+              ForEach-Object { W $_ }
+          W "signtool exit code: $LASTEXITCODE"
+
+          & $signtool.FullName verify /v /pa $target 2>&1 | ForEach-Object { W $_ }
+          W "verify exit code: $LASTEXITCODE"
+
+          $sig = Get-AuthenticodeSignature $target
+          W "Get-AuthenticodeSignature status: $($sig.Status)"
+          W "signer: $($sig.SignerCertificate.Subject)"
+          W "thumbprint: $($sig.SignerCertificate.Thumbprint)"
+
+      - name: upload the sign log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sign-log
+          path: sign.log
+          if-no-files-found: warn
 
       - name: package
         if: always()
