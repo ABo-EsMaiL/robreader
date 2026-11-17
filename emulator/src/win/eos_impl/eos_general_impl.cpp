@@ -31,13 +31,13 @@ DummyEOS_Initialize(EOS_InitializeOptions* options) {
 	 * Fail softly: report the failure to the game and let it handle it. */
 	if (options == nullptr) {
 		PLOGF.printf("EOS_Initialize: options is null");
-		return EOS_InvalidParameters;
+		return EOS_UnexpectedError;
 	}
 
 	EmulatorStauts status = emulator_initializer::init();
 	if (status != EmulatorStauts::OK) {
 		PLOGF.printf("Emulator init failed (status=%d) - reporting InitializationFailed", static_cast<int>(status));
-		return EOS_InitializationFailed;
+		return EOS_UnexpectedError;
 	}
 
 	auto instance = emulator_client::get_instance();
