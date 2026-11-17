@@ -10,3 +10,5 @@ obj/
 emulator/build/
 out/
 config.json
+
+__pycache__/
