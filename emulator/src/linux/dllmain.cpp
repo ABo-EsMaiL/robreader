@@ -12,6 +12,22 @@
 #include "json.hpp"
 
 /*
+ * Two ways for the server to take over the host process, selected by the
+ * "mode" field of config.json:
+ *
+ *   "thread" (default, Rob Run) - the bare Rob Run exe survives forever
+ *       after its E-0405 SteamInitializationError, so its game logic never
+ *       runs and never needs to be stopped.  DllMain only spawns a worker
+ *       thread; everything else (console, logger, the real SDK LoadLibrary,
+ *       the servers) happens on that thread, outside the loader lock -
+ *       AllocConsole and friends are not safe to call from DllMain.
+ *
+ *   "hook" (upstream design) - hook WinMain via MinHook so the server takes
+ *       over before the game runs any of its own logic.  The hook has to be
+ *       installed from DllMain itself, before WinMain is ever entered.
+ */
+
+/*
  * Absolute path of a file next to the host executable.  The bootstrapper is
  * expected to launch the game with its own folder as the working directory,
  * but nothing guarantees it - so config.json is resolved against the game
@@ -28,24 +44,38 @@ static std::string exe_relative_path(const char* file) {
 	return dir + file;
 }
 
+struct server_context {
+	int tcp_port;
+	int http_port;
+	bool use_logger;
+	bool create_console;
+};
+
 /*
- * Two ways for the server to take over the host process, selected by the
- * "mode" field of config.json:
- *
- *   "thread" (default, Rob Run) - the bare Rob Run exe survives forever
- *       after its E-0405 SteamInitializationError, so its game logic never
- *       runs and never needs to be stopped.  The server simply runs on a
- *       background thread created from DllMain: no hooks, no patched
- *       instructions, the smallest possible footprint for integrity scans.
- *
- *   "hook" (upstream design) - hook WinMain via MinHook so the server takes
- *       over before the game runs any of its own logic.  For games that
- *       would keep running past their startup error.
+ * The thread-mode worker: everything that is not safe inside DllMain runs
+ * here, outside the loader lock.
  */
-static DWORD WINAPI server_thread(LPVOID param) {
-	int* ports = (int*)param;
-	bootstrapper::start(ports[0], ports[1]);
-	bootstrapper::run(ports[0], ports[1]);
+static DWORD WINAPI server_worker(LPVOID param) {
+	server_context* ctx = (server_context*)param;
+
+	exception_handler::init();
+
+	// The game logic is dead in thread mode, so repointing the process
+	// working directory at the game folder is harmless and keeps the log
+	// file (and any other relative path) next to the exe.
+	std::string exe_dir = exe_relative_path("");
+	if (exe_dir.size() > 0) {
+		SetCurrentDirectoryA(exe_dir.c_str());
+	}
+
+	if (ctx->create_console) {
+		utils::create_console();
+		printf("Console Initialized (thread mode)\n");
+	}
+	utils::init_logger(false, ctx->use_logger ? plog::verbose : plog::none);
+
+	bootstrapper::start(ctx->tcp_port, ctx->http_port);
+	bootstrapper::run(ctx->tcp_port, ctx->http_port);
 	return 0;
 }
 
@@ -62,45 +92,43 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD fdwReason, LPVOID) {
 		return TRUE;
 	}
 
+	// config.json next to the game exe (absolute path - the working
+	// directory is not guaranteed).  Reading a file inside DllMain is safe;
+	// loading DLLs and opening a console is not.
 	std::optional<std::string> config = utils::read_file(exe_relative_path("config.json"));
-	if (!config.has_value()) {
-		// Write a default config.  Unlike the standalone server we must not
-		// pause or exit here: that would take down the host game process.
-		nlohmann::json json;
+	nlohmann::json json;
+	if (config.has_value()) {
+		json = nlohmann::json::parse(config.value());
+	} else {
+		// Write a default config and keep going with its values - unlike the
+		// standalone server we must not pause or exit inside the game process.
 		json["tcp"] = 7777;
 		json["http"] = 7778;
 		json["logger"] = true;
 		json["mode"] = "thread";
+		json["console"] = true;
 		utils::write_file(exe_relative_path("config.json"), json.dump(4));
-		return TRUE;
 	}
 
-	nlohmann::json json = nlohmann::json::parse(config.value());
-	bool use_logger = json["logger"];
-	int tcp_port = json["tcp"].get<int>();
-	int http_port = json["http"].get<int>();
+	bool use_logger = json.value("logger", true);
 	std::string mode = json.value("mode", "thread");
 
-	if (mode != "hook") {
-		// The game logic is dead in thread mode, so repointing the process
-		// working directory at the game folder is harmless and makes the log
-		// file (and any other relative path) land next to the exe.
-		std::string exe_dir = exe_relative_path("");
-		if (exe_dir.size() > 0) {
-			SetCurrentDirectoryA(exe_dir.c_str());
-		}
-	}
-
-	exception_handler::init();
-	utils::create_console();
-	printf("Console Initialized (mode: %s)\n", mode.c_str());
-	utils::init_logger(false, use_logger ? plog::verbose : plog::none);
-
 	if (mode == "hook") {
-		bootstrapper::main(tcp_port, http_port);
+		// Upstream design: everything happens inside DllMain so the hook is
+		// in place before WinMain is ever entered.
+		exception_handler::init();
+		utils::create_console();
+		printf("Console Initialized (hook mode)\n");
+		utils::init_logger(false, use_logger ? plog::verbose : plog::none);
+		bootstrapper::main(json["tcp"].get<int>(), json["http"].get<int>());
 	} else {
-		static int ports[2] = {tcp_port, http_port};
-		HANDLE thread = CreateThread(nullptr, 0, server_thread, ports, 0, nullptr);
+		// Thread design: DllMain only spawns the worker.
+		static server_context ctx;
+		ctx.tcp_port = json.value("tcp", 7777);
+		ctx.http_port = json.value("http", 7778);
+		ctx.use_logger = use_logger;
+		ctx.create_console = json.value("console", true);
+		HANDLE thread = CreateThread(nullptr, 0, server_worker, &ctx, 0, nullptr);
 		if (thread != nullptr) {
 			CloseHandle(thread);
 		}
