@@ -4,6 +4,7 @@ project(EOSSDK-Win64-Shipping)
 add_library(EOSSDK-Win64-Shipping SHARED
         ${includes_deps}
         dllmain.cpp
+        dummy_exports.cpp
         emulator_client.cpp
         emulator_client.h
         emulator_initializer.cpp
