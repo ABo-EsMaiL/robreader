@@ -13,10 +13,17 @@ DummyEOS_Connect_AddNotifyAuthExpiration(EOS_HConnect handle, void* options, voi
 
 EOS_DECLARE_FUNC(EOS_NotificationId)
 DummyEOS_AntiCheatClient_AddNotifyMessageToServer(EOS_HConnect handle, const EOS_AntiCheatClient_AddNotifyMessageToServerOptions* options, void* clientData, const EOS_AntiCheatClient_OnMessageToServerCallback notificationFn) {
+	auto instance = emulator_client::get_instance();
+	if (options == nullptr || notificationFn == nullptr || instance == nullptr) {
+		PLOGF.printf("AddNotifyMessageToServer: null options/notificationFn/client instance (options=%p fn=%p client=%p)",
+		             (void*)options, (void*)notificationFn, (void*)instance);
+		return 0xdeadbeef;
+	}
+
 	std::shared_ptr<notify_message_to_server_packet> packet = std::make_shared<notify_message_to_server_packet>();
 	packet->options.ApiVersion = options->ApiVersion;
 	packet->require_bind = true;
-	emulator_client::get_instance()->send_packet(packet);
+	instance->send_packet(packet);
 
 	notify_message_to_server_callback callback{};
 	callback.options = *options;

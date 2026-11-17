@@ -1,6 +1,7 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <stdexcept>
 #include <vector>
 
 #include "../emulator_client.h"
@@ -80,6 +81,12 @@ void login_callback(const EOS_Connect_OnLoginCallback completion_delegate, void*
 
 EOS_DECLARE_FUNC(void)
 DummyEOS_Connect_Login(EOS_HConnect handle, const EOS_Connect_LoginOptions* options, void* client_data, const EOS_Connect_OnLoginCallback completion_delegate) {
+	if (options == nullptr || completion_delegate == nullptr) {
+		PLOGF.printf("Connect_Login: null options or completion_delegate (options=%p delegate=%p)", (void*)options,
+		             (void*)completion_delegate);
+		return;
+	}
+
 	auto request = std::make_shared<login_request>();
 	request->api_version = options->ApiVersion;
 
@@ -98,7 +105,23 @@ DummyEOS_Connect_Login(EOS_HConnect handle, const EOS_Connect_LoginOptions* opti
 	}
 
 	PLOGI.printf("Requesting login to proxy");
-	auto response = emulator_client::get_instance()->send_request<login_response>(request);
+	/* A dead server or a bad packet used to throw straight through the game.
+	 * A null response is handled by login_callback (reports a failed login),
+	 * so any exception simply leaves it null. */
+	std::shared_ptr<login_response> response;
+	auto instance = emulator_client::get_instance();
+	if (instance == nullptr) {
+		PLOGF.printf("Connect_Login: client instance missing");
+	} else {
+		try {
+			response = instance->send_request<login_response>(request);
+		} catch (const std::exception& error) {
+			PLOGF.printf("Connect_Login: request threw: %s", error.what());
+		} catch (...) {
+			PLOGF.printf("Connect_Login: request threw an unknown exception");
+		}
+	}
+
 	/* Fire from Platform_Tick (main thread) like the real SDK, after a short
 	 * grace period so the game has finished wiring up its login handlers. */
 	queue_eos_callback([completion_delegate, client_data, response]() {
@@ -108,12 +131,25 @@ DummyEOS_Connect_Login(EOS_HConnect handle, const EOS_Connect_LoginOptions* opti
 
 EOS_DECLARE_FUNC(EOS_ELoginStatus)
 DummyEOS_Connect_GetLoginStatus(EOS_HConnect Handle, EOS_ProductUserId LocalUserId) {
+	auto instance = emulator_client::get_instance();
+	if (instance == nullptr) {
+		PLOGF.printf("GetLoginStatus: client instance missing");
+		return EOS_ELoginStatus_NotLoggedIn;
+	}
+
 	auto request = std::make_shared<login_status_request>();
 	request->user_id = LocalUserId;
 
-	auto response = emulator_client::get_instance()->send_request<login_status_response>(request);
-	if (response == nullptr) {
-		return EOS_ELoginStatus_NotLoggedIn;
+	try {
+		auto response = instance->send_request<login_status_response>(request);
+		if (response == nullptr) {
+			return EOS_ELoginStatus_NotLoggedIn;
+		}
+		return response->status;
+	} catch (const std::exception& error) {
+		PLOGF.printf("GetLoginStatus: request threw: %s", error.what());
+	} catch (...) {
+		PLOGF.printf("GetLoginStatus: request threw an unknown exception");
 	}
-	return response->status;
+	return EOS_ELoginStatus_NotLoggedIn;
 }

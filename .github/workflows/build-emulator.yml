@@ -63,6 +63,10 @@ jobs:
           copy emulator\build\src\win\Release\EOSSDK-Win64-Shipping.dll out\ || exit /b 1
           copy emulator\build\src\linux\Release\EACServer.exe out\ || exit /b 1
           copy emulator\build\src\linux\Release\version.dll out\ || exit /b 1
+          rem .map files are not fatal if the linker skips them
+          copy emulator\build\src\win\Release\EOSSDK-Win64-Shipping.map out\ >nul 2>&1
+          copy emulator\build\src\linux\Release\EACServer.map out\ >nul 2>&1
+          copy emulator\build\src\linux\Release\version.map out\ >nul 2>&1
           dir out
           type build.log
           echo === hashes === 

@@ -1,5 +1,6 @@
 #include <cstring>
 #include <future>
+#include <stdexcept>
 
 #include "../emulator_client.h"
 #include "../emulator_initializer.h"
@@ -25,20 +26,41 @@ dummy_success() {
 
 EOS_DECLARE_FUNC(EOS_EResult)
 DummyEOS_Initialize(EOS_InitializeOptions* options) {
-	auto status = emulator_initializer::init();
-	if (status == EmulatorStauts::REQUIRED_CLOSE) {
-		system("pause");
-		exit(1);
+	/* REQUIRED_CLOSE used to system("pause") + exit(1) inside the game
+	 * process - a missing or broken config file must never kill the game.
+	 * Fail softly: report the failure to the game and let it handle it. */
+	if (options == nullptr) {
+		PLOGF.printf("EOS_Initialize: options is null");
+		return EOS_InvalidParameters;
 	}
 
-	auto packet = std::make_shared<initialize_eos_packet>();
-	packet->api_version = options->ApiVersion;
-	packet->product_name = nullable_string(options->ProductName);
-	packet->product_version = nullable_string(options->ProductVersion);
+	EmulatorStauts status = emulator_initializer::init();
+	if (status != EmulatorStauts::OK) {
+		PLOGF.printf("Emulator init failed (status=%d) - reporting InitializationFailed", static_cast<int>(status));
+		return EOS_InitializationFailed;
+	}
 
-	emulator_client::get_instance()->send_packet(packet);
+	auto instance = emulator_client::get_instance();
+	if (instance == nullptr) {
+		PLOGF.printf("Emulator client instance missing after init");
+		return EOS_UnexpectedError;
+	}
+
+	try {
+		auto packet = std::make_shared<initialize_eos_packet>();
+		packet->api_version = options->ApiVersion;
+		packet->product_name = nullable_string(options->ProductName);
+		packet->product_version = nullable_string(options->ProductVersion);
+		instance->send_packet(packet);
+	} catch (const std::exception& error) {
+		PLOGF.printf("EOS_Initialize: exception while reporting to the server: %s", error.what());
+		return EOS_UnexpectedError;
+	} catch (...) {
+		PLOGF.printf("EOS_Initialize: unknown exception while reporting to the server");
+		return EOS_UnexpectedError;
+	}
+
 	PLOGI.printf("EOS_Initialize handled");
-
 	return EOS_Success;
 }
 

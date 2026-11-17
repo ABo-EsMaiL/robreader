@@ -1,6 +1,8 @@
 #include "emulator_initializer.h"
 
+#include <cstdio>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 #include "common/utils.h"
@@ -27,11 +29,29 @@ EmulatorStauts emulator_initializer::init() {
 		return EmulatorStauts::REQUIRED_CLOSE;
 	}
 
-	nlohmann::json json = nlohmann::json::parse(config.value());
-	bool use_logger = json["logger"];
+	/* A malformed or incomplete config used to escape as an uncaught nlohmann
+	 * exception and kill the whole game.  Parse defensively and fall back to
+	 * the documented defaults instead. */
+	std::string ip = "127.0.0.1";
+	int tcp_port = 7777;
+	int http_port = 7778;
+	bool use_logger = true;
+	try {
+		nlohmann::json json = nlohmann::json::parse(config.value());
+		ip = json.value("ip", ip);
+		use_logger = json.value("logger", true);
+		if (json.contains("ports") && json["ports"].is_object()) {
+			tcp_port = json["ports"].value("tcp", tcp_port);
+			http_port = json["ports"].value("http", http_port);
+		}
+	} catch (const std::exception& error) {
+		printf("config.json is invalid: %s\n", error.what());
+		return EmulatorStauts::REQUIRED_CLOSE;
+	}
+
 	utils::init_logger(true, use_logger ? plog::verbose : plog::none);
 
-	client = new emulator_client(json["ip"], json["ports"]["http"]);
-	client->connect(json["ports"]["tcp"]);
+	client = new emulator_client(ip, http_port);
+	client->connect(tcp_port);
 	return EmulatorStauts::OK;
 }

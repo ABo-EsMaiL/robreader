@@ -1,4 +1,5 @@
 #include <cstring>
+#include <stdexcept>
 #include <string>
 
 #include "../emulator_client.h"
@@ -45,7 +46,19 @@ DummyEOS_Connect_CopyIdToken(EOS_HConnect handle, const EOS_Connect_CopyIdTokenO
 	req->local_user_id = options->LocalUserId;
 
 	PLOGI.printf("CopyIdToken: sending HTTP request");
-	auto response = emulator_client::get_instance()->send_request<copy_id_token_response>(req);
+	auto instance = emulator_client::get_instance();
+	if (instance == nullptr) {
+		PLOGE.printf("CopyIdToken: client instance missing");
+		return EOS_UnexpectedError;
+	}
+	std::shared_ptr<copy_id_token_response> response;
+	try {
+		response = instance->send_request<copy_id_token_response>(req);
+	} catch (const std::exception& error) {
+		PLOGE.printf("CopyIdToken: request threw: %s", error.what());
+	} catch (...) {
+		PLOGE.printf("CopyIdToken: request threw an unknown exception");
+	}
 	PLOGI.printf("CopyIdToken: HTTP request returned (response=%p)", (void*)response.get());
 	if (response == nullptr) {
 		PLOGE.printf("CopyIdToken: no response from the emulator server");

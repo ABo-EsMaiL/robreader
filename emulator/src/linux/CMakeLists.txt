@@ -65,3 +65,16 @@ add_library(version SHARED
         exports.def
 )
 target_link_libraries(version hv_static)
+
+# A .map file next to the binary makes every module+offset in eac-exception.log
+# resolvable to a function name offline.
+if(MSVC)
+	target_link_options(EACServer PRIVATE
+			"/MAP:$<TARGET_FILE_DIR:EACServer>/$<TARGET_FILE_BASE_NAME:EACServer>.map"
+			"/MAPINFO:EXPORTS"
+	)
+	target_link_options(version PRIVATE
+			"/MAP:$<TARGET_FILE_DIR:version>/$<TARGET_FILE_BASE_NAME:version>.map"
+			"/MAPINFO:EXPORTS"
+	)
+endif()

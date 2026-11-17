@@ -1,6 +1,8 @@
 #include "client_packet_handler.h"
 
 #include <memory>
+#include <stdexcept>
+#include <vector>
 
 #include "base64.hpp"
 #include "common/protocol/packet_id.h"
@@ -35,18 +37,33 @@ void client_packet_handler::handle_handshake(std::shared_ptr<packet> packet) {
 
 void client_packet_handler::handle_notify_msg_to_server(std::shared_ptr<packet> packet) {
 	auto notify_message_to_server = std::static_pointer_cast<notify_message_to_server_packet>(packet);
-	auto decoded = base64::decode_into<std::vector<char>>(notify_message_to_server->base64_message_data.c_str());
-	if (decoded.size() != notify_message_to_server->message_data_size) {
-		PLOGE.printf("Decoded message size does not match message data size");
-		return;
-	}
+	try {
+		auto decoded = base64::decode_into<std::vector<char>>(notify_message_to_server->base64_message_data.c_str());
+		if (decoded.size() != notify_message_to_server->message_data_size) {
+			PLOGE.printf("Decoded message size does not match message data size");
+			return;
+		}
 
-	for (auto& callback : notify_message_to_server_callbacks) {
-		EOS_AntiCheatClient_OnMessageToServerCallbackInfo info{};
-		info.ClientData = callback.client_data;
-		info.MessageData = decoded.data();
-		info.MessageDataSizeBytes = notify_message_to_server->message_data_size;
-		callback.notification_fn(&info);
+		for (auto& callback : notify_message_to_server_callbacks) {
+			EOS_AntiCheatClient_OnMessageToServerCallbackInfo info{};
+			info.ClientData = callback.client_data;
+			/* an empty message must not hand the game a null data pointer */
+			info.MessageData = decoded.empty() ? nullptr : decoded.data();
+			info.MessageDataSizeBytes = notify_message_to_server->message_data_size;
+			/* the game's own callback - an exception escaping from here would
+			 * call std::terminate and kill the whole game */
+			try {
+				callback.notification_fn(&info);
+			} catch (const std::exception& error) {
+				PLOGF.printf("Exception inside the game's OnMessageToServer callback: %s", error.what());
+			} catch (...) {
+				PLOGF.printf("Unknown exception inside the game's OnMessageToServer callback");
+			}
+		}
+	} catch (const std::exception& error) {
+		PLOGF.printf("Exception while handling the notify message: %s", error.what());
+	} catch (...) {
+		PLOGF.printf("Unknown exception while handling the notify message");
 	}
 }
 
