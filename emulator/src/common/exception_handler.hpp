@@ -188,8 +188,8 @@ static bool module_for_address(const void* address, char* out_name, size_t out_s
 /* Manual x64 unwind from the crashed context: ntdll's RtlLookupFunctionEntry
  * + RtlVirtualUnwind do the walking, so dbghelp is never loaded inside the
  * crashing process.  Every frame is reported as module+offset, resolvable
- * against the .map file the CI build produces. */
-static void append_stack_trace(const CONTEXT* crashed_context, char* out, size_t out_size, size_t used) {
+ * against the .map file the CI build produces.  Returns the updated length. */
+static size_t append_stack_trace(const CONTEXT* crashed_context, char* out, size_t out_size, size_t used) {
 	HMODULE ntdll = GetModuleHandleA("ntdll.dll");
 	typedef PRUNTIME_FUNCTION(WINAPI* lookup_function_t)(ULONG64, PULONG64, PUNWIND_HISTORY_TABLE);
 	typedef VOID(WINAPI* virtual_unwind_t)(ULONG, ULONG64, ULONG64, PRUNTIME_FUNCTION, PCONTEXT, PVOID*, PULONG64,
@@ -232,6 +232,7 @@ static void append_stack_trace(const CONTEXT* crashed_context, char* out, size_t
 			       nullptr);
 		}
 	}
+	return used;
 }
 
 class exception_handler {
@@ -284,7 +285,7 @@ class exception_handler {
 		                   record != nullptr ? record->NumberParameters : 0, exception_type);
 		if (context != nullptr) {
 			used = append_text(report, sizeof(report), used, "stack (module+offset):\n");
-			append_stack_trace(context, report, sizeof(report), used);
+			used = append_stack_trace(context, report, sizeof(report), used);
 		}
 		append_text(report, sizeof(report), used, "\n");
 
