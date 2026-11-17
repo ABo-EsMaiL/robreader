@@ -34,6 +34,13 @@ std::shared_ptr<response> emulator_client::_request(std::shared_ptr<request> con
 	request->serialize(serialized);
 
 	auto res = requests::post(std::format("http://{}:{}/task", address, http_port).c_str(), serialized.dump());
+	if (res == nullptr) {
+		/* The local emulator server is unreachable.  Returning null here is the
+		 * only safe option: dereferencing res crashed the game with an access
+		 * violation the first time the server was slow to answer. */
+		PLOGE.printf("[HTTP] could not reach the emulator server");
+		return nullptr;
+	}
 	if (res->status_code != 200) {
 		PLOGE.printf("[HTTP] The server has returned an error: %d", res->status_code);
 		return nullptr;

@@ -12,6 +12,17 @@
 void login_callback(const EOS_Connect_OnLoginCallback completion_delegate, void* client_data, std::shared_ptr<login_response> response) {
 	utils::sleep(400);
 	EOS_Connect_LoginCallbackInfo info{};
+	if (response == nullptr) {
+		/* the local server did not answer; tell the game the login failed
+		 * instead of dereferencing a null response (that used to crash it) */
+		PLOGE.printf("login failed: no response from the emulator server");
+		info.ResultCode = EOS_UnexpectedError;
+		info.ClientData = client_data;
+		info.LocalUserId = 0;
+		info.ContinuanceToken = 0;
+		completion_delegate(&info);
+		return;
+	}
 	info.ResultCode = response->result_code;
 	info.ClientData = client_data;
 	info.LocalUserId = response->local_user_id;
@@ -50,5 +61,8 @@ DummyEOS_Connect_GetLoginStatus(EOS_HConnect Handle, EOS_ProductUserId LocalUser
 	request->user_id = LocalUserId;
 
 	auto response = emulator_client::get_instance()->send_request<login_status_response>(request);
+	if (response == nullptr) {
+		return EOS_ELoginStatus_NotLoggedIn;
+	}
 	return response->status;
 }

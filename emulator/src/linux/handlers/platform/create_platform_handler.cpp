@@ -23,15 +23,15 @@ void create_platform_handler::handle(std::shared_ptr<packet> packet) {
 	options.CacheDirectory = create_platform->cache_directory.c_str();
 	options.TickBudgetInMilliseconds = create_platform->tick_budget_in_milliseconds;
 
+	/*
+	 * Older Epic SDKs accepted RTC options with a null PlatformSpecificOptions.
+	 * Newer ones (the copy Rob Run ships) reject the whole platform creation
+	 * with "EOS_Platform_RTCOptions.PlatformSpecificOptions reason: cannot be
+	 * null", so we simply do not ask for RTC at all: the emulator only needs
+	 * the platform, connect and anti-cheat interfaces, never voice.
+	 */
 	options.RTCOptions = nullptr;
-	EOS_Platform_RTCOptions rtc_options{};
-	if (create_platform->has_rtc_options) {
-		rtc_options.ApiVersion = create_platform->rtc_options.api_version;
-		rtc_options.PlatformSpecificOptions = nullptr;
-		rtc_options.BackgroundMode = create_platform->rtc_options.background_mode;
-
-		options.RTCOptions = &rtc_options;
-	}
+	(void)create_platform->has_rtc_options;
 
 	options.IntegratedPlatformOptionsContainerHandle = nullptr;
 	options.SystemSpecificOptions = nullptr;

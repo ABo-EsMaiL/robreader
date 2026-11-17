@@ -74,6 +74,9 @@ DummyEOS_ProductUserId_ToString(EOS_ProductUserId account_id, char* out_buffer, 
 	request->user_id = account_id;
 
 	auto response = emulator_client::get_instance()->send_request<id2string_response>(request);
+	if (response == nullptr) {
+		return EOS_UnexpectedError;
+	}
 	auto buffer = response->buffer;
 	auto buffer_size = response->buffer_size;
 	if (buffer != nullptr) {

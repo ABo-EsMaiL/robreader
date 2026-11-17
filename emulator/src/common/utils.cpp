@@ -1,7 +1,8 @@
-#include "utils.h"
+﻿#include "utils.h"
 
 #include <Windows.h>
 #include <plog/Appenders/ColorConsoleAppender.h>
+#include <plog/Appenders/RollingFileAppender.h>
 #include <plog/Formatters/TxtFormatter.h>
 #include <plog/Init.h>
 
@@ -24,8 +25,11 @@ void utils::create_console() {
 void utils::init_logger(bool use_colored, plog::Severity severity) {
 	static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
 	static plog::ColorConsoleAppender<plog::TxtFormatter> coloredConsoleAppender;
+	/* A console is not always visible - a crashed game takes it with it - so
+	 * everything is mirrored into a file next to the executable as well. */
+	static plog::RollingFileAppender<plog::TxtFormatter> fileAppender("eac-emulator.log", 2 * 1024 * 1024, 2);
 	plog::IAppender* appender = use_colored ? &coloredConsoleAppender : &consoleAppender;
-	plog::init(severity, appender);
+	plog::init(severity, &fileAppender).addAppender(appender);
 }
 
 void utils::sleep(unsigned int ms) {

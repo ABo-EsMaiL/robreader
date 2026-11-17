@@ -5,6 +5,11 @@
 #define EOS_Success 0
 #define EOS_NS_Online 2
 
+/* Real EOS_EResult values we need when the local emulator server cannot be
+ * reached.  They have to match Epic's numbers, because the game reads them. */
+#define EOS_UnexpectedError 0x7FFFFFFF
+#define EOS_ELoginStatus_NotLoggedIn 0
+
 #define EOS_EResult int
 #define EOS_ENetworkStatus int
 
