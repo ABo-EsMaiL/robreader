@@ -17,6 +17,7 @@ add_library(EOSSDK-Win64-Shipping SHARED
         eos_impl/eos_platform_impl.cpp
         eos_impl/eos_session_impl.cpp
         eos_impl/eos_anticheat_impl.cpp
+        eos_impl/eos_rtc_impl.cpp
 
         handler/handlers/client_packet_handler.cpp
         handler/handlers/client_packet_handler.h

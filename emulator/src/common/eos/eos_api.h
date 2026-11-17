@@ -23,6 +23,15 @@ typedef uintptr_t EOS_ContinuanceToken;
 typedef uintptr_t EOS_ELoginStatus;
 typedef uintptr_t EOS_EAntiCheatClientMode;
 
+/* Real-Time Communication interfaces.  The game walks the chain
+ * Platform -> RTC -> Audio/Data/Video for its voice chat module; returning
+ * 0 for any of them makes its C# wrappers null. */
+typedef uintptr_t EOS_HRTC;
+typedef uintptr_t EOS_HRTCAdmin;
+typedef uintptr_t EOS_HRTCAudio;
+typedef uintptr_t EOS_HRTCData;
+typedef uintptr_t EOS_HRTCVideo;
+
 #define EOS_EXTERN_C extern "C"
 #define EOS_CALL __stdcall
 #define EOS_DECLARE_FUNC(ret_type) EOS_EXTERN_C ret_type EOS_CALL
