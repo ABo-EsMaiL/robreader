@@ -45,5 +45,7 @@ add_executable(EACServer
         api/login_handler.h
         api/login_status_handler.cpp
         api/login_status_handler.h
+        api/copy_id_token_handler.cpp
+        api/copy_id_token_handler.h
 )
 target_link_libraries(EACServer hv_static)

@@ -6,3 +6,5 @@
 #define LOGIN_RES_ID 3
 #define LOGIN_STATUS_REQ_ID 4
 #define LOGIN_STATUS_RES_ID 5
+#define COPY_ID_TOKEN_REQ_ID 6
+#define COPY_ID_TOKEN_RES_ID 7

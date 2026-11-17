@@ -12,6 +12,7 @@ add_library(EOSSDK-Win64-Shipping SHARED
         exports.def
 
         eos_impl/eos_general_impl.cpp
+        eos_impl/eos_connect_impl.cpp
         eos_impl/eos_notification_impl.cpp
         eos_impl/eos_platform_impl.cpp
         eos_impl/eos_session_impl.cpp

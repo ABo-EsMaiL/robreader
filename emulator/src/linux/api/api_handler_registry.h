@@ -10,6 +10,7 @@
 #include "id2string_handler.h"
 #include "login_handler.h"
 #include "login_status_handler.h"
+#include "copy_id_token_handler.h"
 
 class api_handler_registry {
 	typedef std::shared_ptr<response>(*HandlerFuncPtr)(std::shared_ptr<request>);
@@ -20,6 +21,7 @@ public:
 		handlers[ID2STRING_REQ_ID] = id2string_handler::handle;
 		handlers[LOGIN_REQ_ID] = login_handler::handle;
 		handlers[LOGIN_STATUS_REQ_ID] = login_status_handler::handle;
+		handlers[COPY_ID_TOKEN_REQ_ID] = copy_id_token_handler::handle;
 
 		PLOGD.printf("Collected %d handlers", handlers.size());
 	}

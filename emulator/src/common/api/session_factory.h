@@ -8,9 +8,11 @@
 #include "requests/id2string_request.h"
 #include "requests/login_request.h"
 #include "requests/login_status_request.h"
+#include "requests/copy_id_token_request.h"
 #include "response/id2string_response.h"
 #include "response/login_response.h"
 #include "response/login_status_response.h"
+#include "response/copy_id_token_response.h"
 
 #define GENERATE_SESSION(t) return std::make_shared<t>();
 
@@ -24,6 +26,8 @@ public:
 				GENERATE_SESSION(login_request)
 			case LOGIN_STATUS_REQ_ID:
 				GENERATE_SESSION(login_status_request);
+			case COPY_ID_TOKEN_REQ_ID:
+				GENERATE_SESSION(copy_id_token_request);
 			default:
 				return nullptr;
 		}
@@ -37,6 +41,8 @@ public:
 				GENERATE_SESSION(login_response);
 			case LOGIN_STATUS_RES_ID:
 				GENERATE_SESSION(login_status_response);
+			case COPY_ID_TOKEN_RES_ID:
+				GENERATE_SESSION(copy_id_token_response);
 			default:
 				return nullptr;
 		}
