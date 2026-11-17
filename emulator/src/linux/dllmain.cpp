@@ -12,6 +12,23 @@
 #include "json.hpp"
 
 /*
+ * Absolute path of a file next to the host executable.  The bootstrapper is
+ * expected to launch the game with its own folder as the working directory,
+ * but nothing guarantees it - so config.json is resolved against the game
+ * exe's folder instead of the current working directory.
+ */
+static std::string exe_relative_path(const char* file) {
+	char path[MAX_PATH];
+	GetModuleFileNameA(nullptr, path, MAX_PATH);
+	std::string dir(path);
+	size_t slash = dir.find_last_of('\\');
+	if (slash != std::string::npos) {
+		dir.resize(slash + 1);
+	}
+	return dir + file;
+}
+
+/*
  * Two ways for the server to take over the host process, selected by the
  * "mode" field of config.json:
  *
@@ -45,7 +62,7 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD fdwReason, LPVOID) {
 		return TRUE;
 	}
 
-	std::optional<std::string> config = utils::read_file("config.json");
+	std::optional<std::string> config = utils::read_file(exe_relative_path("config.json"));
 	if (!config.has_value()) {
 		// Write a default config.  Unlike the standalone server we must not
 		// pause or exit here: that would take down the host game process.
@@ -54,7 +71,7 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD fdwReason, LPVOID) {
 		json["http"] = 7778;
 		json["logger"] = true;
 		json["mode"] = "thread";
-		utils::write_file("config.json", json.dump(4));
+		utils::write_file(exe_relative_path("config.json"), json.dump(4));
 		return TRUE;
 	}
 
@@ -63,6 +80,16 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD fdwReason, LPVOID) {
 	int tcp_port = json["tcp"].get<int>();
 	int http_port = json["http"].get<int>();
 	std::string mode = json.value("mode", "thread");
+
+	if (mode != "hook") {
+		// The game logic is dead in thread mode, so repointing the process
+		// working directory at the game folder is harmless and makes the log
+		// file (and any other relative path) land next to the exe.
+		std::string exe_dir = exe_relative_path("");
+		if (exe_dir.size() > 0) {
+			SetCurrentDirectoryA(exe_dir.c_str());
+		}
+	}
 
 	exception_handler::init();
 	utils::create_console();
