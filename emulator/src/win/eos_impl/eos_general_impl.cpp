@@ -13,6 +13,15 @@ dummy_func() {
 	PLOGF.printf("This should never happened");
 }
 
+/* Some newer Epic SDK functions the game may look up by name are declared to
+ * return EOS_EResult.  Returning 0 (EOS_Success) instead of leaving eax
+ * undefined is safer than the plain dummy above, because the caller reads the
+ * result.  Used by the "Reserved"/"Get...Status" exports added to the .def. */
+EOS_DECLARE_FUNC(int)
+dummy_success() {
+	return 0;
+}
+
 EOS_DECLARE_FUNC(EOS_EResult)
 DummyEOS_Initialize(EOS_InitializeOptions* options) {
 	auto status = emulator_initializer::init();
