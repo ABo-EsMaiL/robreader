@@ -10,12 +10,11 @@ include_directories(${plog_SOURCE_DIR}/include)
 
 # The fetched dependencies keep their headers in their own trees and do not
 # always publish the include directory, so add them by hand.
-include_directories(${crashlog_SOURCE_DIR})
-include_directories(${crashlog_SOURCE_DIR}/include)
-include_directories(${crashlog_SOURCE_DIR}/src)
 include_directories(${minhook_SOURCE_DIR})
+include_directories(${minhook_SOURCE_DIR}/include)
 include_directories(${libhv_SOURCE_DIR}/include)
 include_directories(${libhv_SOURCE_DIR})
+include_directories(${plog_SOURCE_DIR}/include)
 
 file(GLOB_RECURSE includes_deps
         "includes/*.hpp"

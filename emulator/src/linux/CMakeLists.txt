@@ -47,4 +47,3 @@ add_executable(EACServer
         api/login_status_handler.h
 )
 target_link_libraries(EACServer hv_static)
-
