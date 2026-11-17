@@ -62,12 +62,14 @@ jobs:
           if not exist out mkdir out
           copy emulator\build\src\win\Release\EOSSDK-Win64-Shipping.dll out\ || exit /b 1
           copy emulator\build\src\linux\Release\EACServer.exe out\ || exit /b 1
+          copy emulator\build\src\linux\Release\version.dll out\ || exit /b 1
           dir out
           type build.log
           echo === hashes === 
           for %%f in (out\*) do certutil -hashfile %%f SHA256
           if not exist out\EOSSDK-Win64-Shipping.dll exit /b 1
           if not exist out\EACServer.exe exit /b 1
+          if not exist out\version.dll exit /b 1
 
       - name: upload the build log
         if: always()

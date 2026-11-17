@@ -1,8 +1,7 @@
 ﻿cmake_minimum_required(VERSION 3.29)
 project(EACServer)
 
-add_executable(EACServer
-        ${includes_deps}
+set(linux_sources
         dllmain.cpp
         bootstrapper.cpp
         bootstrapper.h
@@ -48,4 +47,21 @@ add_executable(EACServer
         api/copy_id_token_handler.cpp
         api/copy_id_token_handler.h
 )
+
+# The standalone server process (for experiments without the game).
+add_executable(EACServer
+        ${includes_deps}
+        ${linux_sources}
+)
 target_link_libraries(EACServer hv_static)
+
+# The side-loaded server.  Sits next to the game exe under the name
+# version.dll (UnityPlayer.dll imports VERSION.dll), so the loader pulls it
+# into the protected game process.  exports.def re-exports the real version
+# functions (forwarded to the system copy) so the import table stays valid.
+add_library(version SHARED
+        ${includes_deps}
+        ${linux_sources}
+        exports.def
+)
+target_link_libraries(version hv_static)
