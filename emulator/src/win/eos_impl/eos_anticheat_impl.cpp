@@ -6,8 +6,21 @@
 #include "common/protocol/packets/end_session_packet.h"
 #include "common/protocol/packets/receive_message_packet.h"
 
+#include <cstdio>
+
+static void dump_options_bytes(const void* data, size_t count) {
+	char dump[3 * 48 + 1] = {};
+	size_t used = 0;
+	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data);
+	for (size_t i = 0; i < count; ++i) {
+		used += static_cast<size_t>(sprintf_s(dump + used, sizeof(dump) - used, "%02x", bytes[i]));
+	}
+	PLOGI.printf("options raw bytes: %s", dump);
+}
+
 EOS_DECLARE_FUNC(EOS_EResult)
 DummyEOS_AntiCheatClient_BeginSession(EOS_HAntiCheatClient handle, const EOS_AntiCheatClient_BeginSessionOptions* options) {
+	dump_options_bytes(options, 48);
 	PLOGI.printf("Beginning session with mode: %d", options->Mode);
 	auto packet = std::make_shared<begin_session_packet>();
 	packet->api_version = options->ApiVersion;

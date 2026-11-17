@@ -60,8 +60,17 @@ EOS_HAntiCheatClient eos_platform::get_anticheat_client_interface() {
 		PLOGF.printf("Could not resolve EOS_Platform_GetAntiCheatClientInterface");
 		return 0;
 	}
+	if (!hPlatform) {
+		PLOGE.printf("get_anticheat_client_interface: platform not created yet");
+		return 0;
+	}
 
-	return eos_platform_get_anticheat_client_interface(hPlatform);
+	/* Never cache the handle: a null result early (e.g. the anticheat client
+	 * module was not initialised yet) must not be frozen into every later
+	 * handler, and the SDK can hand out different handles per query. */
+	EOS_HAntiCheatClient handle = eos_platform_get_anticheat_client_interface(hPlatform);
+	PLOGI.printf("EOS_Platform_GetAntiCheatClientInterface -> 0x%llx", (unsigned long long)(uintptr_t)handle);
+	return handle;
 }
 
 bool eos_platform::is_platform_created() {

@@ -9,7 +9,11 @@
 void receive_message_handler::handle(std::shared_ptr<packet> packet) {
 	auto receive_message = std::dynamic_pointer_cast<receive_message_packet>(packet);
 
-	static auto anticheat_interface = eos_platform::get_anticheat_client_interface();
+	auto anticheat_interface = eos_platform::get_anticheat_client_interface();
+	if (anticheat_interface == NULL) {
+		PLOGF.printf("Could not retrieve anticheat client interface for ReceiveMessageFromServer");
+		return;
+	}
 
 	auto decoded = base64::decode_into<std::vector<char>>(receive_message->base64_message.c_str());
 	if (decoded.size() != receive_message->data_length_bytes) {
@@ -21,5 +25,6 @@ void receive_message_handler::handle(std::shared_ptr<packet> packet) {
 	options.ApiVersion = receive_message->api_version;
 	options.Data = decoded.data();
 	options.DataLengthBytes = receive_message->data_length_bytes;
+	PLOGI.printf("ReceiveMessageFromServer: %d bytes", receive_message->data_length_bytes);
 	eos_anticheat::receive_message_from_server(anticheat_interface, options);
 }
