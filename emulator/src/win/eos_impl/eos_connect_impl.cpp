@@ -11,10 +11,19 @@
  * own backend.  The old stub returned "Success" without writing OutIdToken,
  * so the game read a garbage token and reported E-0403 EosAuthorizationFailed
  * ("CopyToken result Success").  Ask the local server for the real JWT from
- * the genuine Epic session and hand the game a properly filled token struct. */
+ * the genuine Epic session and hand the game a properly filled token struct.
+ *
+ * The real signature takes the connect handle FIRST:
+ *   EOS_EResult EOS_Connect_CopyIdToken(EOS_HConnect Handle,
+ *       const EOS_Connect_CopyIdTokenOptions* Options,
+ *       EOS_Connect_IdToken** OutIdToken);
+ * Missing that parameter used to make us treat the handle as the options and
+ * the options pointer as the out pointer, which wrote over the game's stack
+ * and then read through the fake handle constant -> 0xC0000005. */
 EOS_DECLARE_FUNC(EOS_EResult)
-DummyEOS_Connect_CopyIdToken(const EOS_Connect_CopyIdTokenOptions* options, EOS_Connect_IdToken** out_id_token) {
-	PLOGI.printf("CopyIdToken: enter (options=%p, out=%p)", (void*)options, (void*)out_id_token);
+DummyEOS_Connect_CopyIdToken(EOS_HConnect handle, const EOS_Connect_CopyIdTokenOptions* options, EOS_Connect_IdToken** out_id_token) {
+	PLOGI.printf("CopyIdToken: enter (handle=0x%llX, options=%p, out=%p)",
+	             (unsigned long long)handle, (void*)options, (void*)out_id_token);
 	if (out_id_token == nullptr) {
 		PLOGE.printf("CopyIdToken: null out_id_token");
 		return EOS_UnexpectedError;
@@ -24,6 +33,9 @@ DummyEOS_Connect_CopyIdToken(const EOS_Connect_CopyIdTokenOptions* options, EOS_
 		PLOGE.printf("CopyIdToken: null options");
 		return EOS_UnexpectedError;
 	}
+	/* The handle is a placeholder our GetConnectInterface returns; the real
+	 * SDK would use it to find the session.  The local server owns the real
+	 * session, so the handle is not dereferenced here. */
 
 	PLOGI.printf("CopyIdToken: options api=%d user=%llu", (int)options->ApiVersion,
 	             (unsigned long long)options->LocalUserId);
