@@ -1,4 +1,7 @@
-#include <thread>
+#include <chrono>
+#include <functional>
+#include <mutex>
+#include <vector>
 
 #include "../emulator_client.h"
 #include "common/api/requests/login_request.h"
@@ -8,9 +11,53 @@
 #include "common/eos/eos_api.h"
 #include "common/eos/eos_login_types.h"
 #include "common/utils.h"
+#include "pending_callbacks.h"
+
+namespace {
+struct pending_callback {
+	std::chrono::steady_clock::time_point ready_at;
+	std::function<void()> invoke;
+};
+
+std::mutex g_callback_mutex;
+std::vector<pending_callback> g_callback_queue;
+}
+
+void queue_eos_callback(std::function<void()> callback, int delay_ms) {
+	std::lock_guard<std::mutex> lock(g_callback_mutex);
+	g_callback_queue.push_back({
+		std::chrono::steady_clock::now() + std::chrono::milliseconds(delay_ms),
+		std::move(callback)
+	});
+}
+
+void drain_eos_callbacks() {
+	std::vector<std::function<void()>> ready;
+	{
+		std::lock_guard<std::mutex> lock(g_callback_mutex);
+		auto now = std::chrono::steady_clock::now();
+		for (auto it = g_callback_queue.begin(); it != g_callback_queue.end();) {
+			if (it->ready_at <= now) {
+				ready.push_back(std::move(it->invoke));
+				it = g_callback_queue.erase(it);
+			} else {
+				++it;
+			}
+		}
+	}
+
+	for (auto& invoke : ready) {
+		/* An exception escaping a callback would otherwise call std::terminate
+		 * and abort the whole game (that is the "unhandled exception" we saw). */
+		try {
+			invoke();
+		} catch (...) {
+			PLOGE.printf("EOS callback threw an exception");
+		}
+	}
+}
 
 void login_callback(const EOS_Connect_OnLoginCallback completion_delegate, void* client_data, std::shared_ptr<login_response> response) {
-	utils::sleep(400);
 	EOS_Connect_LoginCallbackInfo info{};
 	if (response == nullptr) {
 		/* the local server did not answer; tell the game the login failed
@@ -28,7 +75,7 @@ void login_callback(const EOS_Connect_OnLoginCallback completion_delegate, void*
 	info.LocalUserId = response->local_user_id;
 	info.ContinuanceToken = response->continuance_token;
 	completion_delegate(&info);
-	PLOGD.printf("Logged in successfully: user_id=%d", info.LocalUserId);
+	PLOGD.printf("Logged in successfully: user_id=%llu", (unsigned long long)info.LocalUserId);
 }
 
 EOS_DECLARE_FUNC(void)
@@ -52,7 +99,11 @@ DummyEOS_Connect_Login(EOS_HConnect handle, const EOS_Connect_LoginOptions* opti
 
 	PLOGI.printf("Requesting login to proxy");
 	auto response = emulator_client::get_instance()->send_request<login_response>(request);
-	std::thread(login_callback, completion_delegate, client_data, response).detach();
+	/* Fire from Platform_Tick (main thread) like the real SDK, after a short
+	 * grace period so the game has finished wiring up its login handlers. */
+	queue_eos_callback([completion_delegate, client_data, response]() {
+		login_callback(completion_delegate, client_data, response);
+	}, 400);
 }
 
 EOS_DECLARE_FUNC(EOS_ELoginStatus)

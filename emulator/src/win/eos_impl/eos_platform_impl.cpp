@@ -2,6 +2,7 @@
 #include "common/eos/eos_api.h"
 #include "common/eos/eos_platform_types.h"
 #include "common/protocol/packets/create_platform_packet.h"
+#include "pending_callbacks.h"
 
 EOS_DECLARE_FUNC(EOS_HPlatform)
 DummyEOS_Platform_Create(EOS_Platform_Options* options) {
@@ -36,6 +37,9 @@ DummyEOS_Platform_Create(EOS_Platform_Options* options) {
 
 EOS_DECLARE_FUNC(void)
 DummyEOS_Platform_Tick(EOS_HPlatform handle) {
+	/* Real EOS delivers callbacks from the platform tick.  This is also where
+	 * the queued login delegate now runs instead of on a detached thread. */
+	drain_eos_callbacks();
 }
 
 EOS_DECLARE_FUNC(EOS_HConnect)

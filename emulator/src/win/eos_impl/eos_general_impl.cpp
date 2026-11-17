@@ -1,3 +1,4 @@
+#include <cstring>
 #include <future>
 
 #include "../emulator_client.h"
@@ -68,6 +69,20 @@ DummyEOS_Logging_SetLogLevel(int category, int level) {
 	return EOS_Success;
 }
 
+/* The game validates the id it gets from the login callback before doing
+ * anything else.  Up to now this export was an unimplemented stub returning
+ * 0/undefined, so Unity asserted (0x80000003) right after a successful login.
+ * Our ids are opaque non-zero values; anything non-null is "valid" for us. */
+EOS_DECLARE_FUNC(bool)
+DummyEOS_ProductUserId_IsValid(EOS_ProductUserId account_id) {
+	return account_id != 0;
+}
+
+EOS_DECLARE_FUNC(bool)
+DummyEOS_EpicAccountId_IsValid(void* account_id) {
+	return account_id != nullptr;
+}
+
 EOS_DECLARE_FUNC(EOS_EResult)
 DummyEOS_ProductUserId_ToString(EOS_ProductUserId account_id, char* out_buffer, int32_t* in_out_buffer_length) {
 	auto request = std::make_shared<id2string_request>();
@@ -77,14 +92,30 @@ DummyEOS_ProductUserId_ToString(EOS_ProductUserId account_id, char* out_buffer, 
 	if (response == nullptr) {
 		return EOS_UnexpectedError;
 	}
-	auto buffer = response->buffer;
-	auto buffer_size = response->buffer_size;
-	if (buffer != nullptr) {
-		ZeroMemory(out_buffer, *in_out_buffer_length);
-		memcpy(out_buffer, buffer.c_str(), buffer_size + 1);
+
+	const char* text = response->buffer.c_str();
+	if (text == nullptr || in_out_buffer_length == nullptr) {
+		return EOS_UnexpectedError;
 	}
-	*in_out_buffer_length = buffer_size;
-	PLOGI.printf("Writing: ProductUserId=%s len=%d", buffer.c_str(), buffer_size);
+
+	int32_t text_len = response->buffer_size;   /* characters, NUL excluded */
+	if (text_len < 0) {
+		text_len = static_cast<int32_t>(std::strlen(text));
+	}
+	int32_t need = text_len + 1;                 /* + terminating NUL        */
+
+	/* Two-call pattern: first call has out_buffer = nullptr and only asks for
+	 * the required length.  Writing through that null pointer used to AV. */
+	if (out_buffer == nullptr || *in_out_buffer_length < need) {
+		*in_out_buffer_length = need;
+		return EOS_Success;
+	}
+
+	ZeroMemory(out_buffer, need);
+	memcpy(out_buffer, text, text_len);
+	out_buffer[text_len] = '\0';
+	*in_out_buffer_length = text_len;
+	PLOGI.printf("Writing: ProductUserId=%s len=%d", text, text_len);
 
 	return response->result;
 }
