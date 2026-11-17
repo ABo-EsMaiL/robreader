@@ -14,23 +14,32 @@
  * the genuine Epic session and hand the game a properly filled token struct. */
 EOS_DECLARE_FUNC(EOS_EResult)
 DummyEOS_Connect_CopyIdToken(const EOS_Connect_CopyIdTokenOptions* options, EOS_Connect_IdToken** out_id_token) {
+	PLOGI.printf("CopyIdToken: enter (options=%p, out=%p)", (void*)options, (void*)out_id_token);
 	if (out_id_token == nullptr) {
+		PLOGE.printf("CopyIdToken: null out_id_token");
 		return EOS_UnexpectedError;
 	}
 	*out_id_token = nullptr;
 	if (options == nullptr) {
+		PLOGE.printf("CopyIdToken: null options");
 		return EOS_UnexpectedError;
 	}
 
-	auto request = std::make_shared<copy_id_token_request>();
-	request->api_version = options->ApiVersion;
-	request->local_user_id = options->LocalUserId;
+	PLOGI.printf("CopyIdToken: options api=%d user=%llu", (int)options->ApiVersion,
+	             (unsigned long long)options->LocalUserId);
 
-	auto response = emulator_client::get_instance()->send_request<copy_id_token_response>(request);
+	auto req = std::make_shared<copy_id_token_request>();
+	req->api_version = options->ApiVersion;
+	req->local_user_id = options->LocalUserId;
+
+	PLOGI.printf("CopyIdToken: sending HTTP request");
+	auto response = emulator_client::get_instance()->send_request<copy_id_token_response>(req);
+	PLOGI.printf("CopyIdToken: HTTP request returned (response=%p)", (void*)response.get());
 	if (response == nullptr) {
 		PLOGE.printf("CopyIdToken: no response from the emulator server");
 		return EOS_UnexpectedError;
 	}
+	PLOGI.printf("CopyIdToken: response result=%d", (int)response->result);
 	if (response->result != EOS_Success) {
 		PLOGE.printf("CopyIdToken: server returned %d", response->result);
 		return response->result;
@@ -40,6 +49,7 @@ DummyEOS_Connect_CopyIdToken(const EOS_Connect_CopyIdTokenOptions* options, EOS_
 		PLOGE.printf("CopyIdToken: server returned an empty JWT");
 		return EOS_UnexpectedError;
 	}
+	PLOGI.printf("CopyIdToken: got JWT of %d chars", (int)std::strlen(jwt));
 
 	/* The token must stay alive until the game calls IdToken_Release on it. */
 	std::string token_text(jwt);
@@ -58,6 +68,7 @@ DummyEOS_Connect_CopyIdToken(const EOS_Connect_CopyIdTokenOptions* options, EOS_
 
 EOS_DECLARE_FUNC(void)
 DummyEOS_Connect_IdToken_Release(EOS_Connect_IdToken* id_token) {
+	PLOGI.printf("CopyIdToken: IdToken_Release (%p)", (void*)id_token);
 	if (id_token == nullptr) {
 		return;
 	}

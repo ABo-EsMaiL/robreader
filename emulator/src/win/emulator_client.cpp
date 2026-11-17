@@ -32,8 +32,10 @@ emulator_client* emulator_client::get_instance() {
 std::shared_ptr<response> emulator_client::_request(std::shared_ptr<request> const& request) {
 	nlohmann::json serialized;
 	request->serialize(serialized);
+	PLOGD.printf("[HTTP] posting request id=%d", (int)request->get_id());
 
 	auto res = requests::post(std::format("http://{}:{}/task", address, http_port).c_str(), serialized.dump());
+	PLOGD.printf("[HTTP] post returned");
 	if (res == nullptr) {
 		/* The local emulator server is unreachable.  Returning null here is the
 		 * only safe option: dereferencing res crashed the game with an access
@@ -52,6 +54,8 @@ std::shared_ptr<response> emulator_client::_request(std::shared_ptr<request> con
 		PLOGF.printf("Invalid request id: %d", (unsigned char)json["id"]);
 		return nullptr;
 	}
+	PLOGD.printf("[HTTP] created response id=%d, deserializing", (int)json["id"]);
 	response->deserialize(json);
+	PLOGD.printf("[HTTP] deserialized response id=%d", (int)json["id"]);
 	return response;
 }
