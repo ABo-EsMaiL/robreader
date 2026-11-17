@@ -58,18 +58,14 @@ jobs:
 
       - name: collect the DLLs
         shell: cmd
-        run: |
+        run: |-
           if not exist out mkdir out
-          for %%f in (EOSSDK-Win64-Shipping.dll EACServer.exe) do (
-            if exist emulator\build\src\win\%%f\Release\%%f copy emulator\build\src\win\%%f\Release\%%f out\%%f
-            if exist emulator\build\src\linux\%%f\Release\%%f copy emulator\build\src\linux\%%f\Release\%%f out\%%f
-            if exist emulator\build\src\win\%%f\%%f copy emulator\build\src\win\%%f\%%f out\%%f
-            if exist emulator\build\src\linux\%%f\%%f copy emulator\build\src\linux\%%f\%%f out\%%f
-          )
+          copy emulator\build\src\win\Release\EOSSDK-Win64-Shipping.dll out\ || exit /b 1
+          copy emulator\build\src\linux\Release\EACServer.exe out\ || exit /b 1
           dir out
-          echo === hashes === >> build.log
-          for %%f in (out\*) do certutil -hashfile %%f SHA256 >> build.log 2>&1
           type build.log
+          echo === hashes === 
+          for %%f in (out\*) do certutil -hashfile %%f SHA256
           if not exist out\EOSSDK-Win64-Shipping.dll exit /b 1
           if not exist out\EACServer.exe exit /b 1
 
