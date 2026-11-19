@@ -14,6 +14,12 @@
  * attach is visible and no handle is ever opened against the target.  The
  * only kernel API used to find the target is PsLookupProcessByProcessId.
  *
+ * Windows 11 build 26200 refuses to map page-table pages with MmMapIoSpace
+ * (it returns NULL, while neighbouring data pages map fine), so the walk
+ * reads PTEs with MmCopyMemory(MM_COPY_MEMORY_PHYSICAL).  If a physical
+ * read still fails, RbxCopyProcess falls back to MmCopyVirtualMemory --
+ * still no handle and no OpenProcess, just an in-kernel attach.
+ *
  * KPROCESS.DirectoryTableBase is at offset 0x28 on every x64 Windows since
  * Windows 7, so the CR3 offset is not guessed from a build number.
  *
@@ -43,7 +49,12 @@
 static WCHAR g_DeviceName[64] = RBX_DEVICE_DEFAULT;
 
 #define RBX_MAGIC           0x47425852UL   /* 'RBXG' */
-#define RBX_VERSION         1UL
+#define RBX_VERSION         2UL
+
+/* which copy path the last IOCTL_RBX_READ/WRITE used */
+#define RBX_PATH_NONE       0UL
+#define RBX_PATH_CR3        1UL
+#define RBX_PATH_API        2UL
 
 #define IOCTL_RBX_PING    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_RBX_INFO    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -133,6 +144,7 @@ typedef struct _RBX_SLOT {
 static RBX_SLOT g_Slots[RBX_CACHE_SLOTS];
 static ULONG64  g_Stamp;
 static ULONG64  g_ImageBase;
+static ULONG    g_LastPath = RBX_PATH_NONE;
 
 static PVOID RbxMapPage(ULONG64 Phys)
 {
@@ -180,8 +192,22 @@ static PVOID RbxMapPage(ULONG64 Phys)
 
 static BOOLEAN RbxReadPhysQword(ULONG64 Phys, ULONG64 *Value)
 {
-    PUCHAR page = (PUCHAR)RbxMapPage(Phys);
+    MM_COPY_ADDRESS source;
+    SIZE_T transferred = 0;
+    NTSTATUS status;
+    PUCHAR page;
 
+    /*
+     * Page-table pages cannot be mapped with MmMapIoSpace on recent builds,
+     * but MmCopyMemory reads them straight out of physical memory.
+     */
+    source.PhysicalAddress.QuadPart = (LONGLONG)(Phys & ~7ULL);
+    status = MmCopyMemory(Value, source, sizeof(*Value),
+                          MM_COPY_MEMORY_PHYSICAL, &transferred);
+    if (NT_SUCCESS(status) && transferred == sizeof(*Value))
+        return TRUE;
+
+    page = (PUCHAR)RbxMapPage(Phys);
     if (page == NULL)
         return FALSE;
     *Value = *(ULONG64 *)(page + (ULONG)(Phys & 0xFFF));
@@ -242,8 +268,8 @@ static BOOLEAN RbxTranslate(ULONG64 Cr3, ULONG64 Va, ULONG64 *Pa)
 /* process copy                                                        */
 /* ------------------------------------------------------------------ */
 
-static NTSTATUS RbxCopyProcess(ULONG ProcessId, ULONG64 Address,
-                               PVOID Buffer, ULONG Size, BOOLEAN Write)
+static NTSTATUS RbxCopyProcessCr3(ULONG ProcessId, ULONG64 Address,
+                                  PVOID Buffer, ULONG Size, BOOLEAN Write)
 {
     PEPROCESS process = NULL;
     NTSTATUS status;
@@ -296,6 +322,52 @@ static NTSTATUS RbxCopyProcess(ULONG ProcessId, ULONG64 Address,
     }
 
     return status;
+}
+
+/*
+ * Fallback for pages the CR3 walk cannot reach.  There is still no handle and
+ * no OpenProcess: the source process comes from PsLookupProcessByProcessId.
+ */
+static NTSTATUS RbxCopyViaApi(ULONG ProcessId, ULONG64 Address, PVOID Buffer,
+                              ULONG Size, BOOLEAN Write)
+{
+    PEPROCESS source = NULL;
+    PEPROCESS self = PsGetCurrentProcess();
+    NTSTATUS status;
+    SIZE_T done = 0;
+
+    status = PsLookupProcessByProcessId((HANDLE)(ULONG_PTR)ProcessId, &source);
+    if (!NT_SUCCESS(status))
+        return status;
+
+    if (Write)
+        status = MmCopyVirtualMemory(self, Buffer,
+                                     source, (PVOID)(ULONG_PTR)Address,
+                                     Size, KernelMode, &done);
+    else
+        status = MmCopyVirtualMemory(source, (PVOID)(ULONG_PTR)Address,
+                                     self, Buffer,
+                                     Size, KernelMode, &done);
+
+    ObDereferenceObject(source);
+
+    if (NT_SUCCESS(status) && done != Size)
+        status = STATUS_PARTIAL_COPY;
+    return status;
+}
+
+static NTSTATUS RbxCopyProcess(ULONG ProcessId, ULONG64 Address,
+                               PVOID Buffer, ULONG Size, BOOLEAN Write)
+{
+    NTSTATUS status = RbxCopyProcessCr3(ProcessId, Address, Buffer, Size, Write);
+
+    if (NT_SUCCESS(status)) {
+        g_LastPath = RBX_PATH_CR3;
+        return status;
+    }
+
+    g_LastPath = RBX_PATH_API;
+    return RbxCopyViaApi(ProcessId, Address, Buffer, Size, Write);
 }
 
 static BOOLEAN RbxRangeValid(ULONG64 Address, ULONG Size)
@@ -371,7 +443,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
         resp->Magic = RBX_MAGIC;
         resp->Version = RBX_VERSION;
         resp->ImageBase = g_ImageBase;
-        resp->Unused = 0;
+        resp->Unused = g_LastPath;
         information = sizeof(RBX_PING_RESP);
         status = STATUS_SUCCESS;
         break;
