@@ -1,4 +1,4 @@
-/*
+﻿/*
  * robbridge.c - kernel memory bridge for an external reader.
  *
  * Design notes
@@ -77,10 +77,10 @@ typedef struct _RBX_PING_RESP {
 } RBX_PING_RESP;
 
 /* ------------------------------------------------------------------ */
-/* minimal libc                                                        */
+/* minimal helpers (memcpy/memset are intrinsics in kernel headers)    */
 /* ------------------------------------------------------------------ */
 
-void *__cdecl memcpy(void *dst, const void *src, size_t len)
+void *RbxCopy(void *dst, const void *src, size_t len)
 {
     unsigned char *d = (unsigned char *)dst;
     const unsigned char *s = (const unsigned char *)src;
@@ -90,14 +90,18 @@ void *__cdecl memcpy(void *dst, const void *src, size_t len)
     return dst;
 }
 
-void *__cdecl memset(void *dst, int value, size_t len)
+void *RbxZero(void *dst, size_t len)
 {
     unsigned char *d = (unsigned char *)dst;
 
     while (len--)
-        *d++ = (unsigned char)value;
+        *d++ = 0;
     return dst;
 }
+
+/* Not declared by every WDK header; the linker still finds it in ntoskrnl. */
+struct _RBX_PEB;
+struct _RBX_PEB *PsGetProcessPeb(PEPROCESS Process);
 
 /* ------------------------------------------------------------------ */
 /* physical page cache                                                 */
@@ -274,9 +278,9 @@ static NTSTATUS RbxCopyProcess(ULONG ProcessId, ULONG64 Address,
         }
 
         if (Write)
-            memcpy(page + offset, buf, chunk);
+            RbxCopy(page + offset, buf, chunk);
         else
-            memcpy(buf, page + offset, chunk);
+            RbxCopy(buf, page + offset, chunk);
 
         Address += chunk;
         buf += chunk;
@@ -374,7 +378,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        memcpy(&request, buffer, sizeof(request));
+        RbxCopy(&request, buffer, sizeof(request));
 
         status = PsLookupProcessByProcessId((HANDLE)(ULONG_PTR)request.ProcessId,
                                             &process);
@@ -398,7 +402,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        memcpy(&request, buffer, sizeof(request));
+        RbxCopy(&request, buffer, sizeof(request));
 
         if (request.Size == 0 || request.Size > outLength) {
             status = STATUS_INVALID_PARAMETER;
@@ -419,7 +423,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        memcpy(&request, buffer, sizeof(request));
+        RbxCopy(&request, buffer, sizeof(request));
 
         if (request.Size == 0 || request.Size > inLength - sizeof(request)) {
             status = STATUS_INVALID_PARAMETER;
@@ -441,7 +445,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        memcpy(&request, buffer, sizeof(request));
+        RbxCopy(&request, buffer, sizeof(request));
 
         if (request.Size == 0 || request.Size > outLength) {
             status = STATUS_INVALID_PARAMETER;
@@ -452,7 +456,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             break;
         }
 
-        memcpy(buffer, (PVOID)(ULONG_PTR)request.Address, request.Size);
+        RbxCopy(buffer, (PVOID)(ULONG_PTR)request.Address, request.Size);
         information = request.Size;
         status = STATUS_SUCCESS;
         break;
@@ -465,7 +469,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        memcpy(&request, buffer, sizeof(request));
+        RbxCopy(&request, buffer, sizeof(request));
 
         if (request.Size == 0 || request.Size > inLength - sizeof(request)) {
             status = STATUS_INVALID_PARAMETER;
@@ -476,7 +480,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             break;
         }
 
-        memcpy((PVOID)(ULONG_PTR)request.Address,
+        RbxCopy((PVOID)(ULONG_PTR)request.Address,
                (PUCHAR)buffer + sizeof(request), request.Size);
         information = request.Size;
         status = STATUS_SUCCESS;
@@ -494,7 +498,7 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        memcpy(&request, buffer, sizeof(request));
+        RbxCopy(&request, buffer, sizeof(request));
 
         status = PsLookupProcessByProcessId((HANDLE)(ULONG_PTR)request.ProcessId,
                                             &process);
