@@ -191,7 +191,7 @@ static VOID RbxLoadRamRanges(VOID)
         return;
 
     for (i = 0; i < RBX_MAX_RAM_RANGES; i++) {
-        LONGLONG bytes = ranges[i].NumberOfBytes;
+        LONGLONG bytes = ranges[i].NumberOfBytes.QuadPart;
 
         if (bytes == 0)
             break;
