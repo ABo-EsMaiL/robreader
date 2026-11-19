@@ -32,7 +32,15 @@
 
 #include <ntifs.h>
 
-#define RBX_DEVICE_NAME     L"\\Device\\Rbt"
+#define RBX_DEVICE_DEFAULT  L"\\Device\\Rbt"
+
+/*
+ * Writable on purpose: the mapper rewrites this buffer in the image before it
+ * is copied into the kernel.  Manual mapping has no unload path, so a second
+ * map has to pick a different name instead of colliding with the first one.
+ * The buffer is 64 wide chars; the mapper zero-fills the remainder.
+ */
+static WCHAR g_DeviceName[64] = RBX_DEVICE_DEFAULT;
 
 #define RBX_MAGIC           0x47425852UL   /* 'RBXG' */
 #define RBX_VERSION         1UL
@@ -559,7 +567,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = RbxDeviceControl;
     DriverObject->DriverUnload = NULL;
 
-    RtlInitUnicodeString(&deviceName, RBX_DEVICE_NAME);
+    RtlInitUnicodeString(&deviceName, g_DeviceName);
 
     status = IoCreateDevice(DriverObject,
                             0,
@@ -572,6 +580,14 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
         return status;
 
     deviceObject->Flags |= DO_BUFFERED_IO;
+
+    /*
+     * IoCreateDevice sets DO_DEVICE_INITIALIZING and the I/O manager clears it
+     * after DriverEntry returns -- but only when the service manager loaded
+     * the image.  A manually mapped driver gets no such help, and every open
+     * of the device would fail with STATUS_NO_SUCH_DEVICE.
+     */
+    deviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 
     return STATUS_SUCCESS;
 }
