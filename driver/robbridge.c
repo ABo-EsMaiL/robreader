@@ -182,7 +182,7 @@ static ULONG   g_RamCount;
 
 static VOID RbxLoadRamRanges(VOID)
 {
-    PCM_PHYSICAL_MEMORY_RANGE ranges;
+    PPHYSICAL_MEMORY_RANGE ranges;
     ULONG i;
 
     g_RamCount = 0;
