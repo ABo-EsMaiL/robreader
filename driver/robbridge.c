@@ -10,15 +10,28 @@
  *
  * Reading another process is done by walking its page tables (CR3) and
  * mapping the resulting physical pages with MmMapIoSpace.  This avoids
- * KeStackAttachProcess and MmCopyVirtualMemory entirely, so no process
- * attach is visible and no handle is ever opened against the target.  The
- * only kernel API used to find the target is PsLookupProcessByProcessId.
+ * KeStackAttachProcess entirely on the hot path, so no process attach is
+ * visible and no handle is ever opened against the target.  The only kernel
+ * API used to find the target is PsLookupProcessByProcessId.
+ *
+ * Two hard rules learned the expensive way (two 0x50 bugchecks):
+ *
+ *  1. A present PTE does not mean the page is RAM.  GPU / device mappings
+ *     point at MMIO ranges, and both MmMapIoSpace and MmCopyMemory(PHYSICAL)
+ *     bugcheck when handed one.  Every physical address is therefore checked
+ *     against MmGetPhysicalMemoryRanges() before it is touched.
+ *  2. MmCopyVirtualMemory is not a bulk-copy primitive for a kernel buffer:
+ *     it over-copies by the source page offset and writes past the caller's
+ *     buffer.  It is not used at all any more.
  *
  * Windows 11 build 26200 refuses to map page-table pages with MmMapIoSpace
  * (it returns NULL, while neighbouring data pages map fine), so the walk
- * reads PTEs with MmCopyMemory(MM_COPY_MEMORY_PHYSICAL).  If a physical
- * read still fails, RbxCopyProcess falls back to MmCopyVirtualMemory --
- * still no handle and no OpenProcess, just an in-kernel attach.
+ * reads PTEs with MmCopyMemory(MM_COPY_MEMORY_PHYSICAL).
+ *
+ * The scan-safe path (IOCTL_RBX_SREAD) does attach, then copies with
+ * MmCopyMemory(MM_COPY_MEMORY_VIRTUAL) -- the same primitive crash-dump
+ * writers use, which resolves every page kind (including device memory)
+ * without ever naming a physical address.
  *
  * KPROCESS.DirectoryTableBase is at offset 0x28 on every x64 Windows since
  * Windows 7, so the CR3 offset is not guessed from a build number.
@@ -30,7 +43,7 @@
  *   IOCTL_RBX_PING    - no input,  RBX_PING_RESP out
  *   IOCTL_RBX_INFO    - RBX_INFO_REQ in (pid), RBX_INFO_RESP out
  *   IOCTL_RBX_READ    - RBX_MEM_REQ in, raw bytes out
- *   IOCTL_RBX_SREAD   - same, forced through MmCopyVirtualMemory (scan-safe)
+ *   IOCTL_RBX_SREAD   - same, forced through attach + MmCopyMemory(VIRTUAL)
  *   IOCTL_RBX_WRITE   - RBX_MEM_REQ + payload in
  *   IOCTL_RBX_KREAD   - RBX_KREQ in, raw bytes out       (kernel VA)
  *   IOCTL_RBX_KWRITE  - RBX_KREQ + payload in            (kernel VA)
@@ -50,7 +63,7 @@
 static WCHAR g_DeviceName[64] = RBX_DEVICE_DEFAULT;
 
 #define RBX_MAGIC           0x47425852UL   /* 'RBXG' */
-#define RBX_VERSION         3UL
+#define RBX_VERSION         4UL
 
 /* which copy path the last IOCTL_RBX_READ/WRITE used */
 #define RBX_PATH_NONE       0UL
@@ -64,9 +77,9 @@ static WCHAR g_DeviceName[64] = RBX_DEVICE_DEFAULT;
 #define IOCTL_RBX_KREAD   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x804, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_RBX_KWRITE  CTL_CODE(FILE_DEVICE_UNKNOWN, 0x805, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_RBX_VA2PA   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x806, METHOD_BUFFERED, FILE_ANY_ACCESS)
-/* same request as IOCTL_RBX_READ but always uses MmCopyVirtualMemory: the OS
- * resolves every page kind (including device/GPU mappings) safely.  Slower
- * than the CR3 walk, but a scan can never fault on a physical page. */
+/* same request as IOCTL_RBX_READ but forced through attach +
+ * MmCopyMemory(VIRTUAL): the memory manager resolves every page kind,
+ * including device/GPU mappings, and no physical address is ever used. */
 #define IOCTL_RBX_SREAD   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x807, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 typedef struct _RBX_MEM_REQ {
@@ -151,6 +164,59 @@ static ULONG64  g_Stamp;
 static ULONG64  g_ImageBase;
 static ULONG    g_LastPath = RBX_PATH_NONE;
 
+/* ------------------------------------------------------------------ */
+/* RAM map guard                                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A present PTE can point at MMIO (GPU, device BARs).  Handing such an
+ * address to MmMapIoSpace or MmCopyMemory(PHYSICAL) bugchecks 0x50 inside
+ * memmove.  Every physical address we are about to touch is checked against
+ * the real RAM ranges first.
+ */
+#define RBX_MAX_RAM_RANGES 96
+
+static ULONG64 g_RamBase[RBX_MAX_RAM_RANGES];
+static ULONG64 g_RamEnd[RBX_MAX_RAM_RANGES];
+static ULONG   g_RamCount;
+
+static VOID RbxLoadRamRanges(VOID)
+{
+    PCM_PHYSICAL_MEMORY_RANGE ranges;
+    ULONG i;
+
+    g_RamCount = 0;
+    ranges = MmGetPhysicalMemoryRanges();
+    if (ranges == NULL)
+        return;
+
+    for (i = 0; i < RBX_MAX_RAM_RANGES; i++) {
+        LONGLONG bytes = ranges[i].NumberOfBytes;
+
+        if (bytes == 0)
+            break;
+        g_RamBase[i] = (ULONG64)ranges[i].BaseAddress.QuadPart;
+        g_RamEnd[i] = g_RamBase[i] + (ULONG64)bytes;
+    }
+    g_RamCount = i;
+    ExFreePool(ranges);
+}
+
+static BOOLEAN RbxPhysIsRam(ULONG64 Phys)
+{
+    ULONG i;
+
+    if (g_RamCount == 0)
+        return FALSE;
+
+    for (i = 0; i < g_RamCount; i++) {
+        if (Phys >= g_RamBase[i] && Phys < g_RamEnd[i])
+            return TRUE;
+    }
+    return FALSE;
+}
+
+
 static PVOID RbxMapPage(ULONG64 Phys)
 {
     ULONG i;
@@ -160,6 +226,9 @@ static PVOID RbxMapPage(ULONG64 Phys)
 
     Phys &= RBX_PHYS_MASK;
     if (Phys == 0)
+        return NULL;
+
+    if (!RbxPhysIsRam(Phys))
         return NULL;
 
     for (i = 0; i < RBX_CACHE_SLOTS; i++) {
@@ -201,6 +270,9 @@ static BOOLEAN RbxReadPhysQword(ULONG64 Phys, ULONG64 *Value)
     SIZE_T transferred = 0;
     NTSTATUS status;
     PUCHAR page;
+
+    if (!RbxPhysIsRam(Phys & ~7ULL))
+        return FALSE;
 
     /*
      * Page-table pages cannot be mapped with MmMapIoSpace on recent builds,
@@ -330,14 +402,18 @@ static NTSTATUS RbxCopyProcessCr3(ULONG ProcessId, ULONG64 Address,
 }
 
 /*
- * Fallback for pages the CR3 walk cannot reach.  There is still no handle and
- * no OpenProcess: the source process comes from PsLookupProcessByProcessId.
+ * Scan-safe path.  There is still no handle and no OpenProcess: the source
+ * process comes from PsLookupProcessByProcessId.  We attach, then copy with
+ * MmCopyMemory(MM_COPY_MEMORY_VIRTUAL) so the memory manager resolves each
+ * page itself (device/GPU pages included) and no physical address is ever
+ * dereferenced by us.
  */
-static NTSTATUS RbxCopyViaApi(ULONG ProcessId, ULONG64 Address, PVOID Buffer,
-                              ULONG Size, BOOLEAN Write)
+static NTSTATUS RbxCopyVirtual(ULONG ProcessId, ULONG64 Address, PVOID Buffer,
+                               ULONG Size)
 {
     PEPROCESS source = NULL;
-    PEPROCESS self = PsGetCurrentProcess();
+    KAPC_STATE apc;
+    MM_COPY_ADDRESS src;
     NTSTATUS status;
     SIZE_T done = 0;
 
@@ -345,34 +421,41 @@ static NTSTATUS RbxCopyViaApi(ULONG ProcessId, ULONG64 Address, PVOID Buffer,
     if (!NT_SUCCESS(status))
         return status;
 
-    if (Write)
-        status = MmCopyVirtualMemory(self, Buffer,
-                                     source, (PVOID)(ULONG_PTR)Address,
-                                     Size, KernelMode, &done);
-    else
-        status = MmCopyVirtualMemory(source, (PVOID)(ULONG_PTR)Address,
-                                     self, Buffer,
-                                     Size, KernelMode, &done);
+    src.VirtualAddress = (PVOID)(ULONG_PTR)Address;
+
+    KeStackAttachProcess(source, &apc);
+    status = MmCopyMemory(Buffer, src, Size, MM_COPY_MEMORY_VIRTUAL, &done);
+    KeUnstackDetachProcess(&apc);
 
     ObDereferenceObject(source);
 
-    if (NT_SUCCESS(status) && done != Size)
-        status = STATUS_PARTIAL_COPY;
-    return status;
+    if (!NT_SUCCESS(status))
+        return status;
+    if (done != Size)
+        return STATUS_PARTIAL_COPY;
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS RbxCopyProcess(ULONG ProcessId, ULONG64 Address,
                                PVOID Buffer, ULONG Size, BOOLEAN Write)
 {
-    NTSTATUS status = RbxCopyProcessCr3(ProcessId, Address, Buffer, Size, Write);
+    NTSTATUS status;
 
+    if (Write) {
+        /* a write needs a writable mapping of the physical page; the RAM
+         * guard inside the CR3 path is what keeps that legal */
+        g_LastPath = RBX_PATH_CR3;
+        return RbxCopyProcessCr3(ProcessId, Address, Buffer, Size, TRUE);
+    }
+
+    status = RbxCopyProcessCr3(ProcessId, Address, Buffer, Size, FALSE);
     if (NT_SUCCESS(status)) {
         g_LastPath = RBX_PATH_CR3;
         return status;
     }
 
     g_LastPath = RBX_PATH_API;
-    return RbxCopyViaApi(ProcessId, Address, Buffer, Size, Write);
+    return RbxCopyVirtual(ProcessId, Address, Buffer, Size);
 }
 
 static BOOLEAN RbxRangeValid(ULONG64 Address, ULONG Size)
@@ -515,8 +598,8 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             break;
         }
 
-        status = RbxCopyViaApi(request.ProcessId, request.Address,
-                               buffer, request.Size, FALSE);
+        status = RbxCopyVirtual(request.ProcessId, request.Address,
+                                buffer, request.Size);
         if (NT_SUCCESS(status))
             information = request.Size;
         break;
@@ -655,6 +738,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 
     g_ImageBase = 0;
     g_Stamp = 0;
+
+    RbxLoadRamRanges();
 
     for (i = 0; i <= IRP_MJ_MAXIMUM_FUNCTION; i++)
         DriverObject->MajorFunction[i] = RbxUnsupported;
