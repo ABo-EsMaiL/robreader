@@ -10,8 +10,6 @@ name: build-robreader
 #   robreader.zip         - both of the above
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:

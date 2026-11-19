@@ -1,0 +1,136 @@
+name: build-robbridge
+
+# Builds the manual-map kernel bridge (driver/robbridge.c) with the WDK that
+# ships on the windows-2022 runner, then publishes it as a public release
+# asset so it can be fetched without a token.
+#
+# The driver is never installed as a service and is never signed: it is
+# manual-mapped into the kernel by the user mode mapper.
+
+on:
+  push:
+    paths:
+      - 'driver/robbridge.c'
+      - '.github/workflows/build-robbridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: locate the Windows Driver Kit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $wdk = "${env:ProgramFiles(x86)}\Windows Kits\10"
+
+          $ntddk = Get-ChildItem "$wdk\Include" -Recurse -Filter 'ntddk.h' `
+                      -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $ntddk) { throw 'ntddk.h not found' }
+          $kmInc = $ntddk.Directory.FullName
+          $sharedInc = Join-Path (Split-Path $kmInc -Parent) 'shared'
+
+          $all = Get-ChildItem "$wdk\Lib" -Recurse -Filter 'ntoskrnl.lib' `
+                      -ErrorAction SilentlyContinue
+          if (-not $all) { throw 'ntoskrnl.lib not found' }
+          $ntoskrnl = $all | Where-Object { $_.FullName -match '\\x64\\' } |
+                       Select-Object -First 1
+          if (-not $ntoskrnl) { $ntoskrnl = $all[0] }
+          $kmLib = $ntoskrnl.Directory.FullName
+
+          Write-Host "km includes : $kmInc"
+          Write-Host "km lib      : $kmLib"
+
+          "KMINC=$kmInc"    | Out-File -FilePath $env:GITHUB_ENV -Append
+          "KMSH=$sharedInc" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "KMLIB=$kmLib"    | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: build robbridge.sys
+        shell: cmd
+        run: |
+          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+
+          del build.log 2>nul
+          echo === compiling ===
+          cl /nologo /kernel /c /Zl /W3 /O2 /GS- /GR- /EHs- /std:c17 ^
+             /D_UNICODE /D_AMD64_ /D_AMD64 /D_X86_64 ^
+             /I"%KMINC%" /I"%KMSH%" ^
+             /I"%WindowsSdkDir%Include\%WindowsSDKVersion%\km" ^
+             /I"%WindowsSdkDir%Include\%WindowsSDKVersion%\shared" ^
+             /I"%WindowsSdkDir%Include\%WindowsSDKVersion%\ucrt" ^
+             /Fo:robbridge.obj driver\robbridge.c > build.log 2>&1
+          type build.log
+          if not exist robbridge.obj exit /b 1
+
+          echo === linking ===
+          link /nologo /driver /subsystem:native /entry:DriverEntry /machine:x64 ^
+              /nodefaultlib /fixed:no /dynamicbase ^
+              /merge:_TEXT=.text /export:DriverEntry ^
+              /out:robbridge.sys robbridge.obj ^
+              "%KMLIB%\ntoskrnl.lib" ^
+              "%KMLIB%\hal.lib" >> build.log 2>&1
+          type build.log
+          if not exist robbridge.sys exit /b 1
+
+          echo === sections === >> build.log
+          dumpbin /nologo /headers robbridge.sys >> build.log 2>&1
+          echo === imports === >> build.log
+          dumpbin /nologo /imports robbridge.sys >> build.log 2>&1
+          echo === exports === >> build.log
+          dumpbin /nologo /exports robbridge.sys >> build.log 2>&1
+
+          echo === relocations present? ===
+          findstr /C:"RELOCATIONS STRIPPED" build.log && (echo NO RELOCS & exit /b 1)
+          echo relocations ok
+          dir robbridge.sys
+
+      - name: analyse the image
+        shell: pwsh
+        run: |
+          $f = 'robbridge.sys'
+          $h = Get-FileHash $f -Algorithm SHA256
+          Write-Host "sha256 : $($h.Hash)"
+          Write-Host "size   : $((Get-Item $f).Length)"
+          "{ ""sha256"": ""$($h.Hash)"", ""size"": $((Get-Item $f).Length) }" |
+              Out-File -FilePath build-info.json -Encoding utf8 -NoNewline
+
+      - name: upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robbridge-build-log
+          path: build.log
+          if-no-files-found: warn
+
+      - name: upload the driver artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robbridge-driver
+          path: |
+            robbridge.sys
+            build-info.json
+          if-no-files-found: warn
+
+      # Public release assets: raw.githubusercontent needs a token for
+      # actions artifacts, release assets do not need one.
+      - name: publish the release
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = 'rbx-latest'
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+              gh release create $tag --title 'RobBridge (latest build)' `
+                 --notes "Automatic build of driver/robbridge.c at $env:GITHUB_SHA"
+          }
+          gh release upload $tag robbridge.sys build-info.json --clobber
+          gh release view $tag
