@@ -30,6 +30,7 @@
  *   IOCTL_RBX_PING    - no input,  RBX_PING_RESP out
  *   IOCTL_RBX_INFO    - RBX_INFO_REQ in (pid), RBX_INFO_RESP out
  *   IOCTL_RBX_READ    - RBX_MEM_REQ in, raw bytes out
+ *   IOCTL_RBX_SREAD   - same, forced through MmCopyVirtualMemory (scan-safe)
  *   IOCTL_RBX_WRITE   - RBX_MEM_REQ + payload in
  *   IOCTL_RBX_KREAD   - RBX_KREQ in, raw bytes out       (kernel VA)
  *   IOCTL_RBX_KWRITE  - RBX_KREQ + payload in            (kernel VA)
@@ -49,7 +50,7 @@
 static WCHAR g_DeviceName[64] = RBX_DEVICE_DEFAULT;
 
 #define RBX_MAGIC           0x47425852UL   /* 'RBXG' */
-#define RBX_VERSION         2UL
+#define RBX_VERSION         3UL
 
 /* which copy path the last IOCTL_RBX_READ/WRITE used */
 #define RBX_PATH_NONE       0UL
@@ -63,6 +64,10 @@ static WCHAR g_DeviceName[64] = RBX_DEVICE_DEFAULT;
 #define IOCTL_RBX_KREAD   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x804, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_RBX_KWRITE  CTL_CODE(FILE_DEVICE_UNKNOWN, 0x805, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_RBX_VA2PA   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x806, METHOD_BUFFERED, FILE_ANY_ACCESS)
+/* same request as IOCTL_RBX_READ but always uses MmCopyVirtualMemory: the OS
+ * resolves every page kind (including device/GPU mappings) safely.  Slower
+ * than the CR3 walk, but a scan can never fault on a physical page. */
+#define IOCTL_RBX_SREAD   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x807, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 typedef struct _RBX_MEM_REQ {
     ULONG   ProcessId;
@@ -491,6 +496,27 @@ static NTSTATUS RbxDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 
         status = RbxCopyProcess(request.ProcessId, request.Address,
                                 buffer, request.Size, FALSE);
+        if (NT_SUCCESS(status))
+            information = request.Size;
+        break;
+    }
+
+    case IOCTL_RBX_SREAD: {
+        RBX_MEM_REQ request;
+
+        if (inLength < sizeof(request)) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        RbxCopy(&request, buffer, sizeof(request));
+
+        if (request.Size == 0 || request.Size > outLength) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+
+        status = RbxCopyViaApi(request.ProcessId, request.Address,
+                               buffer, request.Size, FALSE);
         if (NT_SUCCESS(status))
             information = request.Size;
         break;
